@@ -214,3 +214,14 @@ select.o_input { appearance: none; -webkit-appearance: none; background-image: l
   text-align: center; color: #888; font-size: 12px; margin: 8px 0; cursor: copy;
 }
 .o_form_dropzone.over { border-color: #21b799; background: #eafaf6; color: #1a7f6b; }
+
+/* ── 切片预览（在基础层上标注继承修改）── */
+.o_slice_target { position: relative; outline: 2px dashed #8b5cf6; outline-offset: 1px; }
+.o_slice_badge {
+  display: inline-block; margin: 4px 0 2px; padding: 3px 9px; border-radius: 6px;
+  font-size: 11px; background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe;
+}
+.o_slice_note {
+  margin: 8px 0; padding: 7px 10px; border-radius: 6px; font-size: 12px;
+  background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
+}

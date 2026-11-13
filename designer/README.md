@@ -26,6 +26,26 @@
 - **字段控件按类型仿真**：布尔→勾选框、文本→多行框、选择→下拉（选项取自 `selection`）、`radio` widget→单选组、many2one→带搜索图标的输入、many2many→标签（tag）列表、one2many→内嵌列表块、日期→日期选择、binary/图像→上传/预览；只读字段渲染为 `.o_readonly_value`。
 - **列表视图 / 搜索视图**：切换 `viewType` 为 `list` / `search` 时，画布分别渲染 `.o_list_view` 表格（含示例数据行）与 `.o_search_panel` / 搜索 chip（来自 `filter` 元素）。
 
+### 图层 / 切片（Layered inheritance）
+
+一个 binding 的 `views[]` 就是一组**有序继承层栈**：
+
+- **基础层（base）**：`mode: primary` 的视图，承载完整的 `elements`（表单主体）。
+- **切片层（slice）**：`mode: extension` 的视图，`inherit` 指向基础层（或其它层），通过 `patches`（xpath/position）在基础层之上做**局部修改**，而非重画整张表单。Odoo 运行时沿 `inherit` 链把各层合并为最终结果——这正是 Odoo「视图继承」机制，DSL 只是把它显式化为可编排的层。
+
+左栏「**图层 / Layers（继承栈）**」面板管理这套层：
+
+- 列出基础层与所有切片层，标注 `基础` / `切片` 徽标；点行切换当前编辑的层。
+- **＋ 切片（在基础层上修改）**：新增一个 `extension` 切片（默认 `inherit` 基础层、空 `patches`）。
+- 每层可 **▲▼ 调序**（决定合并顺序/priority）、可删；切片层可改 `inherit` 目标（指向任意其它层 id）。
+- 选中一个切片层后，中栏画布会**渲染基础层 + 该切片的修改预览**：命中目标字段处出现紫色虚线高亮与 `切片 ▸ …` 说明徽标（如「在『备注』之后插入 client_order_ref」「『总计』改属性 invisible=1」）。
+- 右栏检查器（未选中元素时）出现**「切片修改 (patches)」**编辑器：
+  - 每条 patch 选「目标字段」（自动生成 `//field[@name='…']` 形式的 xpath，也可切原始 xpath）、选 `position`（after/before/inside/replace/attributes）；
+  - 非 attributes 时，用字段面板往该 patch 里**加插入元素**；attributes 时维护 `name=value` 属性列表。
+- 生成器（`oview.backend_a`）把每个切片编译成独立的 `ir.ui.view`（`mode=extension`、`inherit_id`、`<data><xpath …/></data>`），Odoo 自己合并——设计器不出合并后的成品，只编排层。
+
+> 默认示例已带一个切片 `slice_hide_amount`：隐藏「总计」、在「备注」后追加「客户单号」，打开即可见效果。
+
 ### 画布交互
 - **加载模型**：左栏「加载示例模型」（内置 `res.partner` / `sale.order` / `sale.order.line`）或上传 JSON。
 - **切换主模型**：画布顶栏的「模型」下拉，直接把**当前 binding 重新绑定**到另一个已加载的模型；字段面板随之切换为该模型的字段。多 binding 时每个 binding 的模型可独立设置。

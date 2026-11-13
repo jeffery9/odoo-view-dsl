@@ -106,6 +106,24 @@
   .toolbar .grow{flex:1}
   details summary{cursor:pointer;color:var(--accent);font-size:12px}
   code{background:#eef2ff;padding:1px 5px;border-radius:5px;font-size:12px}
+
+  /* 图层 / 切片（Layers / Slices） */
+  .layers{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+  .layer{border:1px solid var(--border);border-radius:9px;padding:8px 9px;background:#f8fafc;cursor:pointer;transition:.1s}
+  .layer:hover{border-color:var(--accent)}
+  .layer.active{border-color:var(--accent);box-shadow:0 0 0 2px #bfdbfe66;background:#eff6ff}
+  .layer-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .layer-name{font-size:13px;font-weight:600;color:var(--text)}
+  .layer-badge{font-size:10px;padding:1px 7px;border-radius:999px}
+  .layer-badge.base{background:#dcfce7;color:#14532d}
+  .layer-badge.slice{background:#ede9fe;color:#5b21b6}
+  .layer-inherit{margin-top:6px;font-size:12px}
+  .layer-ctl{display:flex;gap:5px;margin-top:7px;justify-content:flex-end}
+  .layer-ctl button{padding:2px 8px;font-size:11px}
+  .patch{border:1px solid var(--border);border-radius:9px;padding:9px;margin:9px 0;background:#fbfcfe}
+  .patch .row{margin:4px 0}
+  .patch-elems{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+  .patch-elems .chip.sm{padding:2px 8px;font-size:11px;cursor:pointer}
 </style>
 </head>
 <body>
