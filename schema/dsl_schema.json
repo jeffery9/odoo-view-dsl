@@ -204,7 +204,7 @@
     "ViewTypeBinding": {
       "type": "object",
       "required": ["model", "viewType", "views"],
-      "description": "视图类型绑定：某 (model, viewType) 下的一组 View，经 inherit 链接合并为该类型最终结果。",
+      "description": "视图类型绑定：某 (model, viewType) 下的一组 View，即有序「继承层栈」——层 0 = 基础层(primary)，其余 = 切片层(extension, inherit 基础层)；切片通过 patches(xpath/position) 在基础层上做修改。Odoo 运行时沿 inherit 链合并为该类型最终结果。",
       "properties": {
         "model": { "type": "string" },
         "viewType": { "type": "string" },

@@ -5,6 +5,7 @@
 共用同一条序列化 / 继承 / 组合 / 校验路径（对应规范 §3.1）。
 """
 from __future__ import annotations
+import json
 from typing import Any, Dict, List, Optional
 
 from lxml import etree
@@ -89,6 +90,8 @@ def element_to_node(
         for k in ("widget", "string", "invisible", "readonly", "required",
                   "domain", "context", "groups", "force_save", "placeholder", "password"):
             _set_if(e, k, elem.get(k))
+        if elem.get("options") is not None:
+            e.set("options", json.dumps(elem["options"], ensure_ascii=False))
         for k, v in (elem.get("extra") or {}).items():
             e.set(k, str(v))
         for c in elem.get("children", []):
@@ -133,6 +136,8 @@ def element_to_node(
         _set_if(e, "confirm", elem.get("confirm"))
         _set_if(e, "special", elem.get("special"))
         _set_if(e, "help", elem.get("help"))
+        for k, v in (elem.get("extra") or {}).items():
+            e.set(k, str(v))
         return e
 
     if kind == "separator":

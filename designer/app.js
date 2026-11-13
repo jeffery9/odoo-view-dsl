@@ -1,11 +1,15 @@
 /* Odoo View DSL · Designer prototype (canvas)
- * 三栏：左=工具箱(模型/字段面板)，中=画布(所见即所得)，右=检查器+DSL。
+ * 三栏：左=工具箱(模型/字段面板)，中=画布(所见即所得·仿真 Odoo 视图)，右=检查器+DSL。
  * 角色：把用户意图编译成 DSL（契约 = schema/dsl_schema.json）。不产出 QWeb；
  * 转换由 Python 管线 oview.pipeline 完成。
  *
  * 模型定义（model def）是「意图编译」的必要上下文：
  *   model def -> 知道有哪些字段、各自类型 -> 才能做字段摆放与显示控制。
  * 模型定义只存在于设计器（UI 上下文），不写入 DSL 产物。
+ *
+ * 画布仿真：中栏尽量渲染成真实 Odoo 视图的 DOM 结构与外观
+ * （.o_form_view / .o_form_sheet / .o_group / .o_field_widget / .o_notebook /
+ *  .o_form_statusbar 等），样式见同目录 odoo.css（近似社区浅色主题）。
  */
 (function () {
   "use strict";
@@ -86,7 +90,7 @@
         { name: "company_id", type: "many2one", string: "公司", relation: "res.company" },
         { name: "date_order", type: "datetime", string: "订单日期" },
         { name: "validity_date", type: "date", string: "报价有效期" },
-        { name: "state", type: "selection", string: "状态", readonly: true },
+        { name: "state", type: "selection", string: "状态", readonly: true, selection: [["draft", "草稿"], ["sent", "已发送"], ["sale", "销售订单"], ["done", "已完成"], ["cancel", "已取消"]] },
         { name: "user_id", type: "many2one", string: "销售员", relation: "res.users" },
         { name: "pricelist_id", type: "many2one", string: "价格表", relation: "product.pricelist" },
         { name: "order_line", type: "one2many", string: "订单明细", relation: "sale.order.line" },
@@ -111,7 +115,7 @@
         { name: "price_total", type: "monetary", string: "含税总计", readonly: true, relation: "res.currency" },
         { name: "qty_delivered", type: "float", string: "已交付", readonly: true },
         { name: "qty_invoiced", type: "float", string: "已开票", readonly: true },
-        { name: "state", type: "selection", string: "状态", readonly: true },
+        { name: "state", type: "selection", string: "状态", readonly: true, selection: [["draft", "草稿"], ["sale", "销售订单"], ["cancel", "已取消"]] },
         { name: "currency_id", type: "many2one", string: "币种", relation: "res.currency", readonly: true },
         { name: "company_id", type: "many2one", string: "公司", relation: "res.company" }
       ]
@@ -122,21 +126,39 @@
   const state = {
     module: "dsl_gen",
     bindings: [{
-      model: "res.partner", viewType: "form",
-      views: [{
-        id: "base", mode: "primary",
-        elements: [
-          { kind: "group", string: "Primary", children: [
-            { kind: "field", name: "name" },
-            { kind: "field", name: "email", widget: "email" },
-          ]},
-          { kind: "button", string: "Action", type: "object" },
-        ],
-      }],
+      model: "sale.order", viewType: "form",
+      views: [
+        {
+          id: "base", mode: "primary",
+          elements: [
+            { kind: "group", string: "主要信息", children: [
+              { kind: "field", name: "partner_id" },
+              { kind: "field", name: "date_order" },
+              { kind: "field", name: "user_id" },
+            ]},
+            { kind: "group", string: "金额", children: [
+              { kind: "field", name: "pricelist_id" },
+              { kind: "field", name: "amount_total" },
+            ]},
+            { kind: "notebook", pages: [
+              { string: "订单明细", children: [ { kind: "field", name: "order_line" } ] },
+              { string: "备注", children: [ { kind: "field", name: "note" } ] },
+            ] },
+          ],
+        },
+        {
+          id: "slice_hide_amount", name: "隐藏金额（切片）",
+          mode: "extension", inherit: "base",
+          patches: [
+            { xpath: "//field[@name='amount_total']", position: "attributes", attrs: [{ name: "invisible", value: "1" }] },
+            { xpath: "//field[@name='note']", position: "after", elements: [{ kind: "field", name: "client_order_ref", string: "客户单号" }] },
+          ],
+        },
+      ],
     }],
-    compositions: [{ kind: "act_window", id: "action_partner", model: "res.partner", name: "Partners", views: [{ viewType: "form" }], target: "current" }],
+    compositions: [{ kind: "act_window", id: "action_sale", model: "sale.order", name: "销售订单", views: [{ viewType: "form" }, { viewType: "list" }], target: "current" }],
     actions: [],
-    menus: [{ id: "partner_root", name: "Contacts" }, { id: "partner_menu", name: "Partners", action: "action_partner", parent: "partner_root" }],
+    menus: [{ id: "sale_root", name: "销售" }, { id: "sale_menu", name: "销售订单", action: "action_sale", parent: "sale_root" }],
   };
 
   // UI-only（不进 DSL）
@@ -197,6 +219,13 @@
     if (selectedPath) {
       const e = getPath(state, selectedPath);
       if (e && KIND_DEFS[e.kind] && KIND_DEFS[e.kind].children) {
+        if (e.kind === "notebook") {
+          const pages = e.pages || (e.pages = []);
+          const pi = notebookActive[selectedPath] != null ? notebookActive[selectedPath] : 0;
+          if (!pages[pi]) pages[pi] = { string: "页 " + (pi + 1), children: [] };
+          if (!pages[pi].children) pages[pi].children = [];
+          return selectedPath + ".pages[" + pi + "].children";
+        }
         if (!e.children) e.children = [];
         return selectedPath + ".children";
       }
@@ -239,7 +268,7 @@
     const pal = el("div", { class: "palette" });
     modelDef.fields.forEach((f) => {
       const chip = el("div", { class: "chip", draggable: "true", text: f.name }, [el("span", { class: "t", text: f.type })]);
-      chip.addEventListener("dragstart", (e) => { dragField = f.name; try { e.dataTransfer.setData("text/plain", f.name); } catch (_) {} });
+      chip.addEventListener("dragstart", (e) => { dragField = f.name; try { e.dataTransfer.setData("text", f.name); } catch (_) {} });
       chip.addEventListener("dragend", () => { dragField = null; });
       chip.addEventListener("click", () => { const arr = getPath(state, getAddTargetPath()); if (Array.isArray(arr)) { arr.push({ kind: "field", name: f.name }); rerenderAll(); } });
       pal.appendChild(chip);
@@ -258,8 +287,8 @@
     card.appendChild(el("h2", { text: "添加元素（落入当前选中容器）" }));
     const add = (kind, obj) => { const arr = getPath(state, getAddTargetPath()); if (Array.isArray(arr)) { arr.push(obj); rerenderAll(); } };
     const btns = [
-      ["+ 分组", () => add("group", { kind: "group", string: "分组", children: [] })],
-      ["+ 笔记本", () => add("notebook", { kind: "notebook", children: [{ kind: "page", string: "页 1", children: [] }] })],
+      ["+ 分组", () => add("GROUP", { kind: "group", string: "分组", children: [] })],
+      ["+ 笔记本", () => add("notebook", { kind: "notebook", pages: [{ string: "页 1", children: [] }] })],
       ["+ 按钮", () => add("button", { kind: "button", string: "按钮", type: "object" })],
       ["+ 分隔线", () => add("separator", { kind: "separator" })],
       ["+ 标签", () => add("label", { kind: "label", string: "标签" })],
@@ -290,13 +319,14 @@
     mod.appendChild(el("h2", { text: "Module" }));
     mod.appendChild(el("input", { value: state.module, oninput: (e) => { state.module = e.target.value; renderOutput(); } }));
     left.appendChild(mod);
+    left.appendChild(renderLayers());
     left.appendChild(renderModelsCard());
     left.appendChild(renderPalette());
     left.appendChild(renderAddButtons());
     left.appendChild(renderTree());
   }
 
-  // ════════════ 中栏：画布 ════════════
+  // ════════════ 中栏：画布（仿真 Odoo 视图）═══════════
   function renderCanvasBar() {
     const bar = $("#canvasBar"); bar.innerHTML = "";
     const a = getActive();
@@ -324,144 +354,278 @@
   function renderCanvas() {
     const cv = $("#canvas"); cv.innerHTML = "";
     const a = getActive();
-    if (!a.view) { cv.appendChild(el("div", { class: "muted", text: "无可用视图" })); return; }
-    const sheet = el("div", { class: "sheet" });
-    sheet.addEventListener("click", (e) => { if (e.target === sheet) selectElement(null); });
-    sheet.appendChild(el("div", { class: "sheet-head" }, [el("span", { text: a.binding.viewType + " · " + a.view.id }), el("span", { text: a.binding.model })]));
-    if (a.binding.viewType === "custom") {
-      sheet.appendChild(el("div", { class: "cv-logic", text: "custom 视图 → OWL 组件（见生成产物）。画布仅标注。" }));
-    } else {
-      (a.view.elements || []).forEach((e, i) => sheet.appendChild(canvasElem(e, "bindings[" + activeB + "].views[" + activeV + "].elements[" + i + "]", a.modelName, 0)));
-      sheet.appendChild(renderDropzone("bindings[" + activeB + "].views[" + activeV + "].elements", a.modelDef));
+    if (!a.view) { cv.appendChild(el("div", { class: "o_empty", text: "无可用视图" })); return; }
+    const vt = a.binding.viewType;
+
+    if (vt === "custom") {
+      cv.appendChild(el("div", { class: "o_form_view" }, [el("div", { class: "o_form_sheet" }, [el("div", { class: "o_alert logic", text: "custom 视图 → OWL 组件（见生成产物）。画布仅标注。" })])]));
+      renderCanvasBar(); return;
     }
-    cv.appendChild(sheet);
+    if (vt === "list" || vt === "tree") { cv.appendChild(renderListSheet(a)); renderCanvasBar(); return; }
+    if (vt === "search") { cv.appendChild(renderSearchSheet(a)); renderCanvasBar(); return; }
+
+    // ── form：仿真 Odoo 表单 ──
+    const fv = el("div", { class: "o_form_view o_form_editable" });
+    const sheetBg = el("div", { class: "o_form_sheet_bg" });
+    const sheet = el("div", { class: "o_form_sheet" });
+    // 切片层（extension）：画布渲染「基础层」元素，再叠加该切片的修改预览
+    const isSlice = (a.view.mode || "primary") === "extension";
+    const baseLayer = isSlice ? layerBaseView(a.binding) : null;
+    const baseIdx = baseLayer ? baseLayer.idx : activeV;
+    const renderView = baseLayer ? baseLayer.view : a.view;
+    const base = "bindings[" + activeB + "].views[" + baseIdx + "]";
+    const rootEls = renderView.elements || [];
+    const statusButtons = [];
+    rootEls.forEach((e, i) => { if (e.kind === "button") statusButtons.push({ e, p: base + ".elements[" + i + "]" }); });
+    const hasStatus = statusButtons.length ||
+      (a.modelDef && a.modelDef.fields.some((f) => f.name === "state" && f.type === "selection" && Array.isArray(f.selection)));
+    if (hasStatus) sheet.appendChild(renderStatusbar(a, statusButtons));
+    const body = el("div", { class: "o_form_sheet_body" });
+    rootEls.forEach((e, i) => { if (e.kind === "button") return; body.appendChild(canvasElem(e, base + ".elements[" + i + "]", a.modelName, 0)); });
+    sheet.appendChild(body);
+    sheetBg.appendChild(sheet);
+    fv.appendChild(sheetBg);
+    if (isSlice) applySlicePreview(fv, a.view);   // 在基础层上标注切片的修改
+    cv.appendChild(fv);
     renderCanvasBar();
   }
 
-  function fieldControlVisual(f, elem) {
+  function renderStatusbar(a, buttons) {
+    const bar = el("div", { class: "o_form_statusbar" });
+    const btns = el("div", { class: "o_statusbar_buttons" });
+    buttons.forEach(({ e, p }) => {
+      const cls = "btn " + (e.type === "danger" ? "btn-danger" : (e.type === "secondary" ? "btn-secondary" : "btn-primary"));
+      const b = el("button", { class: cls, text: e.string || "按钮" });
+      b.setAttribute("data-path", p);
+      btns.appendChild(b);
+    });
+    bar.appendChild(btns);
+    const sf = a.modelDef && a.modelDef.fields.find((f) => f.name === "state" && f.type === "selection" && Array.isArray(f.selection));
+    if (sf) {
+      const st = el("div", { class: "o_statusbar_status" });
+      sf.selection.forEach((opt, i) => st.appendChild(el("span", { class: "o_statusbar_item" + (i === 0 ? " active" : ""), text: opt[1] })));
+      bar.appendChild(st);
+    }
+    return bar;
+  }
+
+  function renderListSheet(a) {
+    const wrap = el("div", { class: "o_form_view" });
+    const sheet = el("div", { class: "o_form_sheet" });
+    const modelDef = a.modelDef;
+    const view = el("div", { class: "o_list_view" });
+    const table = el("table", { class: "o_list_table" });
+    const thead = el("thead"); const htr = el("tr");
+    const cols = modelDef ? modelDef.fields.slice(0, 7) : [{ name: "c1", string: "列1" }, { name: "c2", string: "列2" }];
+    cols.forEach((c) => htr.appendChild(el("th", { text: c.string || c.name })));
+    thead.appendChild(htr); table.appendChild(thead);
+    const tb = el("tbody");
+    for (let r = 0; r < 3; r++) { const tr = el("tr"); cols.forEach((c) => tr.appendChild(el("td", { text: listCellSample(c, r) }))); tb.appendChild(tr); }
+    table.appendChild(tb); view.appendChild(table);
+    view.appendChild(el("div", { class: "o_list_add", text: "+ 添加一行" }));
+    sheet.appendChild(view);
+    wrap.appendChild(sheet);
+    return wrap;
+  }
+  function listCellSample(c, r) {
+    const t = c.type;
+    if (t === "boolean") return r % 2 ? "☑" : "☐";
+    if (t === "selection") return c.selection ? c.selection[r % c.selection.length][1] : "选项";
+    if (t === "many2one" || t === "many2many") return (c.string || c.name) + "…";
+    if (t === "monetary" || t === "float" || t === "integer") return "0.00";
+    if (t === "date" || t === "datetime") return "2026-01-0" + (r + 1);
+    return (c.string || c.name) + " " + (r + 1);
+  }
+  function renderSearchSheet(a) {
+    const wrap = el("div", { class: "o_form_view" });
+    const sheet = el("div", { class: "o_form_sheet" });
+    const panel = el("div", { class: "o_search_panel" });
+    panel.appendChild(el("div", { class: "o_search_title", text: "搜索视图（筛选 / 分组）" }));
+    const filters = (a.view.elements || []).filter((e) => e.kind === "filter");
+    const fg = el("div", { class: "o_search_filters" });
+    if (!filters.length) fg.appendChild(el("div", { class: "o_alert", text: "（无 filter 元素）" }));
+    filters.forEach((f, i) => {
+      const chip = el("span", { class: "o_search_chip", text: f.string || f.name });
+      chip.setAttribute("data-path", "bindings[" + activeB + "].views[" + activeV + "].elements[" + i + "]");
+      fg.appendChild(chip);
+    });
+    panel.appendChild(fg);
+    sheet.appendChild(panel);
+    wrap.appendChild(sheet);
+    return wrap;
+  }
+
+  // 字段控件（仿真 Odoo widget）
+  function oFieldControl(f, elem) {
     const type = (f && f.type) || "char";
     const w = elem.widget;
-    let cls = "cv-ctl", txt = "…";
-    if (type === "boolean") { cls += " bool"; txt = "☑ / ☐"; }
-    else if (type === "text") { cls += " ta"; txt = ""; }
-    else if (type === "selection") { txt = "▾ 选择…"; }
-    else if (type === "many2one") { cls += " m2o"; txt = "搜索…"; }
-    else if (type === "one2many" || type === "many2many") { cls += " x2m"; txt = "⊞ (N 条记录)"; }
-    else if (type === "date" || type === "datetime") { txt = "📅 " + type; }
-    else if (type === "monetary" || type === "float" || type === "integer") { txt = "0.00"; }
-    else if (type === "binary") { txt = "🖼 文件"; }
-    else if (w === "email") txt = "name@example.com";
-    else if (w === "url") txt = "https://";
-    else if (w === "phone") txt = "+00 000";
-    return el("div", { class: cls, text: txt });
+    const ctl = el("div", { class: "o_ctl" });
+    const readonly = (f && f.readonly) || elem.readonly === "1";
+    if (readonly) { ctl.appendChild(el("span", { class: "o_readonly_value", text: readonlySample(f, w) })); return ctl; }
+    if (type === "boolean") { ctl.appendChild(el("input", { type: "checkbox", class: "o_field_boolean" })); return ctl; }
+    if (type === "text" || w === "html" || w === "text") { ctl.appendChild(el("textarea", { class: "o_input", rows: "3", placeholder: "请输入…" })); return ctl; }
+    if (type === "selection" || w === "selection") {
+      const sel = el("select", { class: "o_input" });
+      const opts = (f && f.selection) || [["v1", "选项1"], ["v2", "选项2"]];
+      opts.forEach((o) => sel.appendChild(el("option", { value: o[0], text: o[1] })));
+      ctl.appendChild(sel); return ctl;
+    }
+    if (w === "radio" && type === "selection") {
+      const rg = el("div", { class: "o_radio_group" });
+      (f.selection || [["v1", "选1"], ["v2", "选2"]]).forEach((o) => {
+        const lab = el("label", { class: "o_radio" });
+        lab.appendChild(el("input", { type: "radio", name: "r" + Math.random().toString(36).slice(2) }));
+        lab.appendChild(document.createTextNode(" " + o[1]));
+        rg.appendChild(lab);
+      });
+      ctl.appendChild(rg); return ctl;
+    }
+    if (type === "many2many") {
+      const tags = el("div", { class: "o_field_many2manytags" });
+      (f && f.relation ? [f.relation + " 记录"] : ["标签"]).forEach((t) => {
+        const tag = el("span", { class: "o_tag" }, [document.createTextNode(t), el("span", { class: "x", text: "×" })]);
+        tags.appendChild(tag);
+      });
+      tags.appendChild(el("span", { class: "add", text: "+" }));
+      ctl.appendChild(tags); return ctl;
+    }
+    if (type === "one2many") { ctl.appendChild(renderListPreview(f && f.relation)); return ctl; }
+    if (type === "date" || type === "datetime") {
+      const dp = el("div", { class: "o_datepicker" });
+      dp.appendChild(el("input", { class: "o_input", placeholder: type === "date" ? "YYYY-MM-DD" : "YYYY-MM-DD HH:MM" }));
+      ctl.appendChild(dp); return ctl;
+    }
+    if (type === "binary" || w === "image" || w === "pdf_viewer") { ctl.appendChild(el("div", { class: "o_attachment", text: "🖼 文件" })); return ctl; }
+    const inp = el("input", { class: "o_input", placeholder: placeholderFor(type, w) });
+    if (type === "monetary" || type === "float" || type === "integer") inp.style.textAlign = "right";
+    ctl.appendChild(inp);
+    return ctl;
+  }
+  function placeholderFor(type, w) {
+    if (w === "email") return "name@example.com";
+    if (w === "url") return "https://";
+    if (w === "phone") return "+00 000 000";
+    if (type === "monetary") return "0.00";
+    if (type === "integer" || type === "float") return "0";
+    if (type === "char") return "请输入…";
+    return "";
+  }
+  function readonlySample(f, w) {
+    const t = f && f.type;
+    if (t === "boolean") return "是";
+    if (t === "selection") return (f.selection && f.selection[0] && f.selection[0][1]) || "选项";
+    if (t === "many2one") return (f.relation || "关联") + " 记录";
+    if (t === "many2many") return (f.relation || "关联") + " ×N";
+    if (t === "monetary" || t === "float" || t === "integer") return "0.00";
+    if (t === "date" || t === "datetime") return "2026-01-01";
+    return "示例值";
+  }
+  function renderListPreview(relation) {
+    const rel = getModel(relation);
+    const wrap = el("div", { class: "o_list_view" });
+    const table = el("table", { class: "o_list_table" });
+    const thead = el("thead"); const htr = el("tr");
+    const cols = rel ? rel.fields.slice(0, 6) : [{ name: "col1", string: "列1" }, { name: "col2", string: "列2" }];
+    cols.forEach((c) => htr.appendChild(el("th", { text: c.string || c.name })));
+    thead.appendChild(htr); table.appendChild(thead);
+    const tb = el("tbody");
+    for (let r = 0; r < 2; r++) { const tr = el("tr"); cols.forEach((c) => tr.appendChild(el("td", { text: listCellSample(c, r) }))); tb.appendChild(tr); }
+    table.appendChild(tb); wrap.appendChild(table);
+    wrap.appendChild(el("div", { class: "o_list_add", text: "+ 添加一行" }));
+    return wrap;
   }
 
   function canvasElem(elem, path, modelName, depth) {
-    const def = KIND_DEFS[elem.kind] || {};
     const isSel = path === selectedPath;
     const modelDef = getModel(modelName);
 
     // 逻辑类（非可视字段）以标注呈现
     if (["if", "foreach", "set", "slot", "call", "dynamicAttr", "raw"].includes(elem.kind)) {
-      const b = el("div", { class: "cv-logic" + (isSel ? " sel" : ""), text: "⟨" + elem.kind + (elem.cond ? " " + elem.cond : elem.name ? " " + elem.name : "") + "⟩" });
-      b.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
+      const b = el("div", { class: "o_alert logic" + (isSel ? " sel" : ""), text: "⟨" + elem.kind + (elem.cond ? " " + elem.cond : elem.name ? " " + elem.name : elem.qweb ? " raw" : "") + "⟩" });
+      b.setAttribute("data-path", path);
       return b;
     }
 
     if (elem.kind === "field") {
       const f = fieldOf(modelDef, elem.name);
-      const block = el("div", { class: "cv-field" + (isSel ? " sel" : "") });
-      const label = el("div", { class: "cv-label", text: (elem.string || (f && f.string) || elem.name || "字段") + ((f && f.required) ? " *" : "") });
-      if (f && f.required) label.appendChild(el("span", { class: "req", text: " *" }));
-      block.appendChild(label);
-      block.appendChild(fieldControlVisual(f, elem));
-      if (f) block.appendChild(el("div", { class: "typebadge", text: f.type + (f.relation ? " → " + f.relation : "") }));
-      if (elem.colspan && parseInt(elem.colspan, 10) > 1) block.style.gridColumn = "span " + parseInt(elem.colspan, 10);
-      block.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
-      return block;
+      const wcls = "o_field_" + ((elem.widget && elem.widget.replace(/[^a-z0-9]/gi, "_")) || (f ? f.type : "char"));
+      const wrap = el("div", { class: "o_field_widget " + wcls + (isSel ? " sel" : "") + (elem.invisible === "1" ? " o_invisible_modifier" : "") });
+      wrap.setAttribute("data-path", path);
+      if (elem.name) wrap.setAttribute("data-field", elem.name);
+      const lab = el("label", { class: "o_form_label", text: (elem.string || (f && f.string) || elem.name || "字段") });
+      if (f && f.required) lab.appendChild(el("span", { class: "o_required", text: " *" }));
+      wrap.appendChild(lab);
+      wrap.appendChild(oFieldControl(f, elem));
+      if (f) wrap.appendChild(el("div", { class: "o_typebadge", text: f.type + (f.relation ? " → " + f.relation : "") }));
+      if (elem.colspan && parseInt(elem.colspan, 10) > 1) wrap.style.gridColumn = "span " + parseInt(elem.colspan, 10);
+      if (f && f.readonly) wrap.classList.add("o_readonly_modifier");
+      return wrap;
     }
 
     if (elem.kind === "button") {
-      const b = el("div", { class: "cv-field" + (isSel ? " sel" : "") });
-      b.appendChild(el("div", { class: "cv-label", text: "按钮" }));
-      b.appendChild(el("div", { class: "cv-button", text: elem.string || "Button" }));
-      b.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
+      const b = el("button", { class: "btn btn-primary o_inline_btn", text: elem.string || "按钮" });
+      b.setAttribute("data-path", path);
       return b;
     }
 
     if (elem.kind === "separator") {
-      const s = el("div", { class: "cv-separator" }, [el("span", { text: elem.string || "" })]);
-      s.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
+      const s = el("div", { class: "o_horizontal_separator", text: elem.string || "" });
+      s.setAttribute("data-path", path);
       return s;
     }
 
     if (elem.kind === "label") {
-      const l = el("div", { class: "cv-label-el" + (isSel ? " sel" : ""), text: elem.string || "标签" });
-      l.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
+      const l = el("div", { class: "o_form_label o_standalone" + (isSel ? " sel" : ""), text: elem.string || "标签" });
+      l.setAttribute("data-path", path);
       return l;
     }
 
-    // 容器：group / notebook / page
-    if (elem.kind === "group") {
-      const box = el("div", { class: "cv-group" + (isSel ? " sel" : "") });
-      const title = el("div", { class: "cv-title" }, [el("span", { text: elem.string || "分组" }), el("span", { class: "muted", text: "点选编辑" })]);
-      title.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
-      box.appendChild(title);
+    if (elem.kind === "group" || elem.kind === "page") {
+      const box = el("div", { class: "o_group o_inner_group" + (isSel ? " sel" : "") });
+      box.setAttribute("data-path", path);
       const cols = (elem.col && parseInt(elem.col, 10) > 0) ? parseInt(elem.col, 10) : 2;
-      const grid = el("div", { class: "cv-grid", style: "grid-template-columns:repeat(" + cols + ",1fr)" });
-      (elem.children || []).forEach((c, ci) => grid.appendChild(canvasElem(c, path + ".children[" + ci + "]", modelName, depth + 1)));
-      box.appendChild(grid);
+      box.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0,1fr))";
+      if (elem.string) box.appendChild(el("div", { class: "o_horizontal_separator", text: elem.string }));
+      (elem.children || []).forEach((c, ci) => box.appendChild(canvasElem(c, path + ".children[" + ci + "]", modelName, depth + 1)));
       box.appendChild(renderDropzone(path + ".children", modelDef));
       if (elem.colspan && parseInt(elem.colspan, 10) > 1) box.style.gridColumn = "span " + parseInt(elem.colspan, 10);
-      box.addEventListener("click", (e) => { if (e.target === box) selectElement(path); });
-      return box;
-    }
-    if (elem.kind === "page") {
-      const box = el("div", { class: "cv-group" + (isSel ? " sel" : "") });
-      const title = el("div", { class: "cv-title" }, [el("span", { text: elem.string || "页" }), el("span", { class: "muted", text: "点选编辑" })]);
-      title.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
-      box.appendChild(title);
-      const grid = el("div", { class: "cv-grid" });
-      (elem.children || []).forEach((c, ci) => grid.appendChild(canvasElem(c, path + ".children[" + ci + "]", modelName, depth + 1)));
-      box.appendChild(grid);
-      box.appendChild(renderDropzone(path + ".children", modelDef));
-      if (elem.colspan && parseInt(elem.colspan, 10) > 1) box.style.gridColumn = "span " + parseInt(elem.colspan, 10);
-      box.addEventListener("click", (e) => { if (e.target === box) selectElement(path); });
-      return box;
-    }
-    if (elem.kind === "notebook") {
-      const box = el("div", { class: "cv-notebook" + (isSel ? " sel" : ""), onclick: (e) => { if (e.target === box) selectElement(path); } });
-      const pages = (elem.children || []).filter((c) => c.kind === "page");
-      const tabs = el("div", { class: "cv-tabs" });
-      const activeIdx = notebookActive[path] != null ? notebookActive[path] : 0;
-      pages.forEach((p, pi) => {
-        const tab = el("div", { class: "cv-tab" + (pi === activeIdx ? " active" : ""), text: p.string || ("页 " + (pi + 1)) });
-        tab.addEventListener("click", (e) => { e.stopPropagation(); notebookActive[path] = pi; renderCanvas(); });
-        tabs.appendChild(tab);
-      });
-      box.appendChild(tabs);
-      const page = pages[activeIdx];
-      const panel = el("div", { class: "cv-page" });
-      if (page) {
-        const pgrid = el("div", { class: "cv-grid" });
-        (page.children || []).forEach((c, ci) => pgrid.appendChild(canvasElem(c, path + ".children[" + pages.indexOf(page) + "].children[" + ci + "]", modelName, depth + 1)));
-        panel.appendChild(pgrid);
-        panel.appendChild(renderDropzone(path + ".children[" + pages.indexOf(page) + "].children", modelDef));
-      }
-      box.appendChild(panel);
-      // 笔记本头部点选（非 tab 区）
-      tabs.addEventListener("click", (e) => { if (e.target === tabs) selectElement(path); });
       return box;
     }
 
-    // 其它未知 kind 兜底
-    const b = el("div", { class: "cv-logic" + (isSel ? " sel" : ""), text: "▣ " + elem.kind });
-    b.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path); });
+    if (elem.kind === "notebook") {
+      const box = el("div", { class: "o_notebook" + (isSel ? " sel" : "") });
+      box.setAttribute("data-path", path);
+      const pages = elem.pages || [];
+      const tabs = el("div", { class: "o_notebook_headers" });
+      const activeIdx = notebookActive[path] != null ? notebookActive[path] : 0;
+      pages.forEach((p, pi) => {
+        const tab = el("div", { class: "o_notebook_tab" + (pi === activeIdx ? " active" : ""), text: p.string || ("页 " + (pi + 1)) });
+        tab.addEventListener("click", (e) => { e.stopPropagation(); notebookActive[path] = pi; selectElement(path + ".pages[" + pi + "]"); });
+        tabs.appendChild(tab);
+      });
+      box.appendChild(tabs);
+      const pane = el("div", { class: "tab-pane" });
+      const page = pages[activeIdx];
+      if (page) {
+        const pagePath = path + ".pages[" + activeIdx + "]";
+        const pbox = el("div", { class: "o_notebook_page", "data-path": pagePath });
+        (page.children || []).forEach((c, ci) => pbox.appendChild(canvasElem(c, pagePath + ".children[" + ci + "]", modelName, depth + 1)));
+        pbox.appendChild(renderDropzone(pagePath + ".children", modelDef));
+        pane.appendChild(pbox);
+      }
+      box.appendChild(pane);
+      box.addEventListener("click", (e) => { if (e.target === box) selectElement(path); });
+      return box;
+    }
+
+    // 其它未知 kind
+    const b = el("div", { class: "o_alert" + (isSel ? " sel" : ""), text: "▣ " + elem.kind });
+    b.setAttribute("data-path", path);
     return b;
   }
 
   function renderDropzone(arrPath, modelDef) {
-    const dz = el("div", { class: "cv-dropzone" });
+    const dz = el("div", { class: "o_form_dropzone" });
     dz.appendChild(el("span", { text: "⤵ 拖拽字段到此，或 " }));
     if (modelDef) {
       const sel = el("select", { onchange: (e) => { if (e.target.value) { const arr = getPath(state, arrPath); if (Array.isArray(arr)) { arr.push({ kind: "field", name: e.target.value }); e.target.value = ""; rerenderAll(); } } } });
@@ -471,7 +635,7 @@
     } else { dz.appendChild(el("span", { class: "muted", text: "（加载模型定义后可用）" })); }
     dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
     dz.addEventListener("dragleave", () => dz.classList.remove("over"));
-    dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("over"); const name = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || dragField; if (name) { const arr = getPath(state, arrPath); if (Array.isArray(arr)) { arr.push({ kind: "field", name }); rerenderAll(); } } });
+    dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("over"); const name = (e.dataTransfer && e.dataTransfer.getData("text")) || dragField; if (name) { const arr = getPath(state, arrPath); if (Array.isArray(arr)) { arr.push({ kind: "field", name }); rerenderAll(); } } });
     return dz;
   }
 
@@ -497,15 +661,26 @@
         [["primary", "primary"], ["extension", "extension"]].forEach(([v, t]) => msel.appendChild(el("option", { value: v, text: t, selected: (a.view.mode || "primary") === v ? "selected" : null })));
         card.appendChild(el("label", { text: "mode" })); card.appendChild(msel);
         if (a.view.mode === "extension") { card.appendChild(el("label", { text: "inherit" })); card.appendChild(el("input", { value: a.view.inherit || "", oninput: (e) => { a.view.inherit = e.target.value; renderOutput(); } })); }
+        if (a.view.mode === "extension") card.appendChild(renderPatchEditor(a.view));
       }
       return card;
     }
     const elem = getPath(state, selectedPath);
     const a = getActive();
+    const pm = selectedPath.match(/\.pages\[(\d+)\]$/);
+    if (pm) { card.appendChild(renderPageInspector(selectedPath)); return card; }
     const def = KIND_DEFS[elem.kind] || {};
     card.appendChild(el("div", { class: "insp-title" }, [el("span", { text: "▣ " + elem.kind }), el("span", { class: "muted", text: selectedPath })]));
     if (elem.kind === "field") { card.appendChild(renderFieldEditor(elem, selectedPath, a.modelName)); }
-    else { card.appendChild(renderGenericFields(elem, selectedPath, def)); if (def.children) card.appendChild(el("div", { class: "muted", text: "这是一个容器，可在画布拖入字段，或点选「+ 字段」。" })); }
+    else {
+      card.appendChild(renderGenericFields(elem, selectedPath, def));
+      if (def.children) {
+        if (elem.kind === "notebook") {
+          card.appendChild(el("button", { class: "sm", text: "+ 页", onclick: () => { const pages = elem.pages || (elem.pages = []); pages.push({ string: "页 " + (pages.length + 1), children: [] }); rerenderAll(); } }));
+        }
+        card.appendChild(el("div", { class: "muted", text: "这是一个容器，可在画布拖入字段，或点选「+ 字段」。" }));
+      }
+    }
     // move / delete
     const m = selectedPath.match(/(.*)\[(\d+)\]$/);
     if (m) {
@@ -532,6 +707,191 @@
         frag.appendChild(el("input", { value: val, oninput: (e) => { setPath(state, path + "." + f, e.target.value); updateCanvas(); } }));
       }
     });
+    return frag;
+  }
+
+  function renderPageInspector(selectedPath) {
+    const frag = document.createDocumentFragment();
+    const m = selectedPath.match(/(.*)\.pages\[(\d+)\]$/);
+    if (!m) { frag.appendChild(el("div", { class: "muted", text: "无法解析页路径" })); return frag; }
+    const pagesPath = m[1] + ".pages";
+    const pi = +m[2];
+    const pages = getPath(state, pagesPath);
+    const page = pages ? pages[pi] : null;
+    if (!page) { frag.appendChild(el("div", { class: "muted", text: "页不存在" })); return frag; }
+    frag.appendChild(el("div", { class: "insp-title" }, [el("span", { text: "▣ page" }), el("span", { class: "muted", text: selectedPath })]));
+    frag.appendChild(el("label", { text: "string（页标签）" }));
+    frag.appendChild(el("input", { value: page.string || "", placeholder: "页签标题", oninput: (e) => { page.string = e.target.value; rerenderAll(); } }));
+    frag.appendChild(el("div", { class: "muted", text: "本页含 " + (page.children ? page.children.length : 0) + " 个元素。可在画布拖入字段，或点选「+ 字段」。" }));
+    const row = el("div", { class: "row", style: "margin-top:8px" });
+    row.appendChild(el("button", { class: "sm danger", text: "删除本页", onclick: () => { pages.splice(pi, 1); selectedPath = null; rerenderAll(); } }));
+    frag.appendChild(row);
+    return frag;
+  }
+
+  // ════════════ 图层 / 切片（Layers / Slices）═══════════
+  // 概念：ViewTypeBinding.views[] 即有序「继承层栈」。
+  //   层 0 = 基础层（primary）；其余 = 切片层（extension），inherit 基础层，
+  //   通过 patches（xpath/position）在基础层上做修改。Odoo 运行时沿 inherit 链合并。
+  function layerBaseView(binding) {
+    const arr = (binding && binding.views) || [];
+    const i = arr.findIndex((v) => (v.mode || "primary") !== "extension");
+    if (i >= 0) return { view: arr[i], idx: i };
+    if (arr.length) return { view: arr[0], idx: 0 };
+    return null;
+  }
+  function addSlice(b) {
+    const base = layerBaseView(b);
+    const n = (b.views || []).filter((v) => (v.mode || "primary") === "extension").length + 1;
+    const id = "slice_" + n;
+    if (!b.views) b.views = [];
+    b.views.push({ id: id, name: "切片 " + n, mode: "extension", inherit: base ? base.view.id : undefined, patches: [] });
+    activeV = b.views.length - 1; selectedPath = null; rerenderAll();
+  }
+  function moveLayer(b, i, dir) {
+    const j = i + dir;
+    if (!b.views || j < 0 || j >= b.views.length) return;
+    const t = b.views[i]; b.views[i] = b.views[j]; b.views[j] = t;
+    b.views.forEach((v, k) => { v.priority = k; });
+    if (activeV === i) activeV = j; else if (activeV === j) activeV = i;
+    rerenderAll();
+  }
+  function firstFieldName(view) {
+    const stack = (view && view.elements) ? [].concat(view.elements) : [];
+    while (stack.length) {
+      const e = stack.shift();
+      if (!e) continue;
+      if (e.kind === "field" && e.name) return e.name;
+      if (e.children) stack.push.apply(stack, e.children);
+      if (e.pages) e.pages.forEach((pg) => { if (pg.children) stack.push.apply(stack, pg.children); });
+    }
+    return "name";
+  }
+  function xpathFieldName(xpath) {
+    if (!xpath) return null;
+    const m = String(xpath).match(/field\[@name\s*=\s*['"]([^'"]+)['"]\]/);
+    return m ? m[1] : null;
+  }
+  function sliceBadgeText(p, tname) {
+    const pos = p.position || "after";
+    const label = tname ? "“" + tname + "”" : "(目标)";
+    const posText = { after: "之后插入", before: "之前插入", inside: "内添加", replace: "替换", attributes: "改属性" }[pos] || pos;
+    let txt = "切片 ▸ 在 " + label + " " + posText;
+    if (pos !== "attributes") {
+      const els = p.elements || [];
+      if (els.length) txt += "：" + els.map((e) => e.kind === "field" ? e.name : e.kind).join(", ");
+    } else {
+      const attrs = p.attrs || [];
+      if (attrs.length) txt += "：" + attrs.map((a) => a.name + "=" + (a.value != null ? a.value : "")).join(", ");
+    }
+    return txt;
+  }
+  function applySlicePreview(root, slice) {
+    (slice.patches || []).forEach((p, pi) => {
+      const tname = xpathFieldName(p.xpath);
+      const targets = [];
+      (function walk(n) {
+        if (!n || typeof n !== "object" || n.tagName === "#text") return;
+        if (n.classList && n.classList.contains("o_field_widget") && n.getAttribute && n.getAttribute("data-field") === tname) targets.push(n);
+        const ch = n.children || [];
+        for (let i = 0; i < ch.length; i++) walk(ch[i]);
+      })(root);
+      if (targets.length) {
+        targets.forEach((tn) => {
+          tn.classList.add("o_slice_target");
+          const badge = el("div", { class: "o_slice_badge", text: sliceBadgeText(p, tname) });
+          const pn = tn.parentNode;
+          if (pn && pn.insertBefore) pn.insertBefore(badge, tn.nextSibling || null);
+          else if (pn) pn.appendChild(badge);
+        });
+      } else {
+        const note = el("div", { class: "o_slice_note", text: "切片修改 #" + (pi + 1) + "：当前基础层未命中目标 " + (tname ? "“" + tname + "”" : (p.xpath || "（无 xpath）")) });
+        root.appendChild(note);
+      }
+    });
+  }
+  function renderLayers() {
+    const card = el("div", { class: "card" });
+    const a = getActive();
+    const b = a.binding;
+    card.appendChild(el("h2", { text: "图层 / Layers（继承栈）" }));
+    card.appendChild(el("p", { class: "muted", text: "基础层 = primary 视图；切片层 = 在其上做修改的 extension 视图（inherit 基础层）。Odoo 运行时沿 inherit 链合并。" }));
+    const list = el("div", { class: "layers" });
+    (b.views || []).forEach((v, vi) => {
+      const isBase = (v.mode || "primary") !== "extension";
+      const row = el("div", { class: "layer" + (vi === activeV ? " active" : "") });
+      row.addEventListener("click", (e) => { if (e.target.closest && e.target.closest(".layer-ctl")) return; activeV = vi; selectedPath = null; rerenderAll(); });
+      const head = el("div", { class: "layer-head" });
+      head.appendChild(el("span", { class: "layer-name", text: v.name || v.id }));
+      head.appendChild(el("span", { class: "layer-badge " + (isBase ? "base" : "slice"), text: isBase ? "基础" : "切片" }));
+      row.appendChild(head);
+      if (!isBase) {
+        const inh = el("select", { class: "layer-inherit", onchange: (e) => { v.inherit = e.target.value; renderOutput(); }, title: "inherit 目标（基础层 id）" });
+        (b.views || []).forEach((o, j) => { if (j !== vi) inh.appendChild(el("option", { value: o.id, text: o.id, selected: o.id === v.inherit ? "selected" : null })); });
+        if (!inh.children.length) inh.appendChild(el("option", { value: "", text: "(无其它层)" }));
+        row.appendChild(inh);
+      }
+      const ctl = el("div", { class: "layer-ctl" });
+      ctl.appendChild(el("button", { class: "sm", text: "▲", title: "上移", onclick: (e) => { e.stopPropagation(); moveLayer(b, vi, -1); } }));
+      ctl.appendChild(el("button", { class: "sm", text: "▼", title: "下移", onclick: (e) => { e.stopPropagation(); moveLayer(b, vi, +1); } }));
+      ctl.appendChild(el("button", { class: "sm danger", text: "✕", title: "删除层", onclick: (e) => { e.stopPropagation(); b.views.splice(vi, 1); if (activeV >= b.views.length) activeV = Math.max(0, b.views.length - 1); rerenderAll(); } }));
+      row.appendChild(ctl);
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    card.appendChild(el("button", { class: "sm", text: "＋ 切片（在基础层上修改）", onclick: () => { addSlice(b); } }));
+    return card;
+  }
+  function renderPatchEditor(view) {
+    const frag = document.createDocumentFragment();
+    const a = getActive();
+    frag.appendChild(el("div", { class: "insp-title" }, [el("span", { text: "切片修改 (patches)" }), el("span", { class: "muted", text: "继承层对基础层的 xpath/position 修改" })]));
+    const patches = view.patches || (view.patches = []);
+    if (!patches.length) frag.appendChild(el("div", { class: "muted", text: "尚无修改。点「＋ 添加修改」选择目标字段与位置。" }));
+    const base = layerBaseView(a.binding);
+    const modelDef = getModel(a.binding.model);
+    const baseModelDef = base ? getModel(base.view.model || a.binding.model) : modelDef;
+    patches.forEach((p, pi) => {
+      const sub = el("div", { class: "patch" });
+      sub.appendChild(el("label", { text: "目标（字段名 → xpath）" }));
+      const tval = xpathFieldName(p.xpath) || p.xpath || "";
+      sub.appendChild(el("input", {
+        value: tval, placeholder: "如 amount_total",
+        list: baseModelDef ? ensureFieldDatalist(baseModelDef) : undefined,
+        oninput: (e) => { const v = e.target.value.trim(); p.xpath = (v.indexOf("//") >= 0 || v.indexOf("@") >= 0) ? v : '//field[@name="' + v + '"]'; renderOutput(); },
+      }));
+      sub.appendChild(el("label", { text: "position" }));
+      const pos = el("select", { onchange: (e) => { p.position = e.target.value; rerenderAll(); } });
+      [["after", "after（之后）"], ["before", "before（之前）"], ["inside", "inside（之内）"], ["replace", "replace（替换）"], ["attributes", "attributes（改属性）"]].forEach(([v, t]) => pos.appendChild(el("option", { value: v, text: t, selected: (p.position || "after") === v ? "selected" : null })));
+      sub.appendChild(pos);
+      if ((p.position || "after") !== "attributes") {
+        sub.appendChild(el("label", { text: "插入的元素（点选字段添加）" }));
+        const pe = p.elements || (p.elements = []);
+        const pl = el("div", { class: "patch-elems" });
+        pe.forEach((elc, ei) => pl.appendChild(el("span", { class: "chip sm", text: (elc.kind === "field" ? elc.name : elc.kind), onclick: () => { pe.splice(ei, 1); rerenderAll(); } })));
+        sub.appendChild(pl);
+        if (modelDef) {
+          const sel = el("select", { onchange: (e) => { if (e.target.value) { const f = fieldOf(modelDef, e.target.value); pe.push({ kind: "field", name: e.target.value, string: f ? f.string : undefined }); e.target.value = ""; renderOutput(); } } });
+          sel.appendChild(el("option", { value: "", text: "+ 字段" }));
+          modelDef.fields.forEach((f) => sel.appendChild(el("option", { value: f.name, text: f.name + " (" + f.type + ")" })));
+          sub.appendChild(sel);
+        }
+      } else {
+        sub.appendChild(el("label", { text: "属性修改 (attrs)" }));
+        const attrs = p.attrs || (p.attrs = []);
+        attrs.forEach((at, ai) => {
+          const r = el("div", { class: "row" });
+          r.appendChild(el("input", { value: at.name || "", placeholder: "属性名", oninput: (e) => { at.name = e.target.value; renderOutput(); } }));
+          r.appendChild(el("input", { value: at.value != null ? at.value : "", placeholder: "值", oninput: (e) => { at.value = e.target.value; renderOutput(); } }));
+          r.appendChild(el("button", { class: "sm danger", text: "×", onclick: () => { attrs.splice(ai, 1); rerenderAll(); } }));
+          sub.appendChild(r);
+        });
+        sub.appendChild(el("button", { class: "sm", text: "+ 属性", onclick: () => { attrs.push({ name: "", value: "" }); rerenderAll(); } }));
+      }
+      sub.appendChild(el("button", { class: "sm danger", text: "删除此修改", onclick: () => { patches.splice(pi, 1); rerenderAll(); } }));
+      frag.appendChild(sub);
+    });
+    frag.appendChild(el("button", { class: "sm", text: "＋ 添加修改 (patch)", onclick: () => { const base = layerBaseView(a.binding); const fname = base ? firstFieldName(base.view) : "name"; patches.push({ xpath: '//field[@name="' + fname + '"]', position: "after", elements: [] }); rerenderAll(); } }));
     return frag;
   }
 
@@ -629,7 +989,7 @@
     state.bindings.forEach((b, i) => {
       const bid = "bindings[" + i + "]"; if (!b.model) errs.push(bid + ": 缺 model"); if (!b.viewType) errs.push(bid + ": 缺 viewType");
       const modelDef = getModel(b.model);
-      (b.views || []).forEach((v, j) => { const vid = bid + ".views[" + j + "]"; if (!v.id) errs.push(vid + ": 缺 id"); if (v.mode === "extension" && !v.inherit) errs.push(vid + ": extension 必须有 inherit"); validateElements(v.elements || [], vid + ".elements", modelDef, errs); });
+      (b.views || []).forEach((v, j) => { const vid = bid + ".views[" + j + "]"; if (!v.id) errs.push(vid + ": 缺 id"); if (v.mode === "extension" && !v.inherit) errs.push(vid + ": extension 必须有 inherit"); (v.patches || []).forEach((p, k) => { const pid = vid + ".patches[" + k + "]"; if (!p.xpath) errs.push(pid + ": 缺 xpath"); if (!p.position) errs.push(pid + ": 缺 position"); }); validateElements(v.elements || [], vid + ".elements", modelDef, errs); });
     });
     (state.compositions || []).forEach((c, i) => { if (!c.model) errs.push("compositions[" + i + "]: 缺 model"); if (!Array.isArray(c.views) || !c.views.length) errs.push("compositions[" + i + "]: 至少一个 view"); });
     (state.menus || []).forEach((m, i) => { if (!m.id) errs.push("menus[" + i + "]: 缺 id"); if (!m.name) errs.push("menus[" + i + "]: 缺 name"); });
@@ -676,7 +1036,25 @@
   }
   function buildArch() {
     const lines = [];
-    state.bindings.forEach((b) => { (b.views || []).forEach((v) => { if (b.viewType === "custom") { lines.push("<!-- custom view '" + v.id + "' -> OWL component -->"); return; } lines.push("<" + b.viewType + ' id="' + esc(v.id) + '">'); (v.elements || []).forEach((e) => lines.push(elemToXml(e, 1))); lines.push("</" + b.viewType + ">"); }); });
+    state.bindings.forEach((b) => { (b.views || []).forEach((v) => {
+      if (b.viewType === "custom") { lines.push("<!-- custom view '" + v.id + "' -> OWL component -->"); return; }
+      const mode = v.mode || "primary";
+      const open = "<" + b.viewType + ' id="' + esc(v.id) + '"' + (mode === "extension" ? ' mode="extension"' : "") + ">";
+      lines.push(open);
+      if (mode === "extension") {
+        lines.push("  <data>");
+        (v.patches || []).forEach((p) => {
+          lines.push('    <xpath expr="' + esc(p.xpath || "") + '" position="' + esc(p.position || "after") + '">');
+          (p.elements || []).forEach((e) => lines.push(elemToXml(e, 3)));
+          (p.attrs || []).forEach((at) => lines.push('      <attribute name="' + esc(at.name || "") + '">' + esc(at.value != null ? at.value : "") + "</attribute>"));
+          lines.push("    </xpath>");
+        });
+        lines.push("  </data>");
+      } else {
+        (v.elements || []).forEach((e) => lines.push(elemToXml(e, 1)));
+      }
+      lines.push("</" + b.viewType + ">");
+    }); });
     return lines.join("\n");
   }
   function currentOutput() {
@@ -686,7 +1064,7 @@
   }
   function renderOutput() {
     const { yaml } = currentOutput();
-    $("#yamlOut").textContent = yaml;
+    const yo = $("#yamlOut"); if (yo) yo.textContent = yaml;
     const lean = leanValidate(); const full = fullValidate();
     const errs = full ? lean.concat(full.filter((x) => !lean.includes(x))) : lean;
     const st = $("#status");
@@ -699,7 +1077,18 @@
   }
 
   // ── 启动 ──
+  // 预载示例模型，画布开箱即所见即所得（状态栏 pills / 真实字段控件）
+  Object.values(SAMPLE_MODELS).forEach((d) => { modelRegistry[d.name] = d; });
   renderToolbox();
   renderCanvas();
   renderRight();
+
+  // 画布点击委托：命中 [data-path] 即选中该元素；点空白处取消
+  const cvEl = $("#canvas");
+  if (cvEl) cvEl.addEventListener("click", (e) => {
+    const t = e.target;
+    const node = t && t.closest ? t.closest("[data-path]") : null;
+    if (node) selectElement(node.getAttribute("data-path"));
+    else if (t === cvEl) selectElement(null);
+  });
 })();
