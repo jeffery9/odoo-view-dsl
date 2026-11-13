@@ -18,6 +18,19 @@ _FIELD_KNOWN = {
     "block", "qweb", "reason", "extra",
 }
 
+# 生成器支持的全部元素种类（DSL IR 层已知集合）。
+# 与 validator/dsl_validate.py 中的 KNOWN_KINDS 保持同步：校验器须独立可运行，
+# 不从本模块 import，故两处各持一份副本（变更时需同步）。
+KNOWN_KINDS = {
+    "field", "group", "notebook", "page", "button", "separator", "label",
+    "filter", "subview", "component", "if", "foreach", "set", "slot",
+    "dynamicAttr", "call", "raw",
+}
+
+# 这些元素是服务端（标准）视图原语，自定义 OWL 模板不应出现（G3 生成器自保）。
+# 与标准视图不同：自定义视图是纯 QWeb/HTML 模板，没有 <notebook>/<filter> 等 Odoo 结构。
+_SERVER_ONLY_KINDS = {"notebook", "page", "separator", "filter", "subview"}
+
 
 def _set_if(elem: etree._Element, key: str, val: Any) -> None:
     if val is None:
@@ -49,6 +62,21 @@ def element_to_node(
     """把单个 DSL Element 降低为 lxml 节点。"""
     kind = elem.get("kind")
     fragments = fragments or {}
+
+    # 不静默降级铁律（规范 §6.4）：未知/缺失 kind 直接抛错，绝不产出 <span> 死节点。
+    if kind is None:
+        raise ValueError(f"Element 缺少 kind 字段: {elem!r}")
+    if kind not in KNOWN_KINDS:
+        raise ValueError(
+            f"未知元素种类 {kind!r}：不在 DSL 元素词汇中，"
+            f"不再静默降级为 <span> 死节点（违反规范「不静默降级」原则）"
+        )
+    # G3 生成器自保：自定义 OWL 模板拒绝服务端视图原语（不依赖「先校验后生成」顺序）。
+    if vtype == "custom" and kind in _SERVER_ONLY_KINDS:
+        raise ValueError(
+            f"元素 <{kind}> 是服务端（标准）视图原语，不能出现在自定义 OWL 模板中 "
+            f"(vtype=custom)：自定义视图是纯 QWeb/HTML，应使用 if/foreach/component 等表达"
+        )
 
     if kind == "field":
         # 自定义视图（OWL 模板）无 <field> 标签：映射为 t-esc 显示 props 字段
@@ -186,10 +214,14 @@ def element_to_node(
         e = etree.Element("t")
         mode = elem.get("mode", "attr")
         if mode == "f":
+            # 格式化字符串属性：t-attf-{name} = "format {expr}"
             e.set(f"t-attf-{elem['attr']}", elem["value"])
         elif mode == "map":
-            e.set(f"t-att-{elem['attr']}", elem["value"])
+            # 多属性映射：t-att = {a:1, b:2} —— 按 dict 同时设置多个属性。
+            # 注意：不是 t-att-{attr}（那是「单属性模式」，attr 变成属性名后缀）。
+            e.set("t-att", elem["value"])
         else:
+            # 单属性模式（默认 attr）：t-att-{name} = expr
             e.set(f"t-att-{elem['attr']}", elem["value"])
         return e
 
@@ -212,10 +244,8 @@ def element_to_node(
             e.set("data-raw-error", str(ex))
             return e
 
-    # 未知种类：不静默丢弃，标记为未知以便校验捕获
-    e = etree.Element("span")
-    e.set("data-unknown-kind", str(kind or "none"))
-    return e
+    # 兜底：理论上不会到达（顶部已对未知 kind 抛错）；保留为防御性失败，绝不静默生成死节点。
+    raise ValueError(f"未处理的元素种类 {kind!r}（element_to_node 遗漏分支，请上报）")
 
 
 def elements_to_root(elements: List[Dict], vtype: str,

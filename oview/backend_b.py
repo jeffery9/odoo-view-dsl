@@ -55,6 +55,7 @@ import {{ Component }} from "@odoo/owl";
 import {{ useState }} from "@odoo/owl";
 import {{ useService }} from "@web/core/utils/hooks";
 import {{ registry }} from "@web/core/registry";
+import {{ View }} from "@web/views/view";
 
 // 自定义视图组件：props 来自 action context / env services（非 recordset 绑定）
 export class {cls} extends Component {{
@@ -72,8 +73,18 @@ export class {cls} extends Component {{
     }}
 }}
 {cls}.template = {tmpl!r};
-// 注册为客户端 action（替代手写 view_registry 字符串游离）
+
+// 注册为客户端 action（菜单/按钮打开，兼容非 view_mode 入口）
 registry.category("actions").add({tag!r}, {cls});
+
+// 注册为视图类型（G2）：可作为 ir.actions.act_window 的 view_mode 出现，
+// 需配套 ir.ui.view(type={vid!r})（见本生成器产出的 ir.ui.view 记录）。
+// Model / Controller 若需拉取数据，可在子类中补充（static Model / static Controller）。
+class {cls}View extends View {{
+    static type = {vid!r};
+    static Renderer = {cls};
+}}
+registry.category("views").add({vid!r}, {cls}View);
 '''
     # —— XML QWeb 模板（t-name 根，复用 QWeb IR） ——
     tname = etree.Element("t", {"t-name": tmpl, "t-att-role": "'region'",
@@ -108,17 +119,36 @@ registry.category("actions").add({tag!r}, {cls});
         "model": "ir.actions.client",
         "fields": action_fields,
     }
-    return {"files": files, "action": action_record, "tag": tag, "template": tmpl, "class": cls}
+    # —— ir.ui.view（自定义视图类型，G1/G2）——
+    # type=vid（自定义类型键，与 JS view_registry 注册键一致），arch 根标签即该键；
+    # 真实渲染由 OWL 组件接管。配合 act_window 的 view_mode/view_ids 即可作为视图出现。
+    # 注：真实 Odoo 模块需在 __manifest__/模型上把该类型 selection_add 到 ir.ui.view.type。
+    view_record = {
+        "xml_id": f"{module}.view_{vid}",
+        "model": "ir.ui.view",
+        "fields": {
+            "name": view.get("name") or name,
+            "model": model,
+            "type": vid,
+            "mode": "primary",
+        },
+        "arch": f"<{vid}/>",
+        "inherit": None,
+    }
+    return {"files": files, "action": action_record, "view": view_record,
+            "tag": tag, "template": tmpl, "class": cls}
 
 
-def binding_custom_records(binding: Dict, module: str = "dsl_gen") -> Tuple[List, List]:
-    """ViewTypeBinding（custom）→ 所有自定义 View 的文件 + action 记录。"""
+def binding_custom_records(binding: Dict, module: str = "dsl_gen") -> Tuple[List, List, List]:
+    """ViewTypeBinding（custom）→ 所有自定义 View 的文件 + action 记录 + ir.ui.view 记录。"""
     binding = normalize_binding(binding)
     all_files: List[Tuple[str, str]] = []
     action_records: List[Dict] = []
+    view_records: List[Dict] = []
     for v in binding.get("views", []):
         if (v.get("viewType") or binding.get("viewType")) == "custom" or v.get("custom"):
             res = generate_custom_view(v, binding, module)
             all_files.extend(res["files"])
             action_records.append(res["action"])
-    return all_files, action_records
+            view_records.append(res["view"])
+    return all_files, action_records, view_records

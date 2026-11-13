@@ -61,8 +61,12 @@ def is_standard(view_type: str) -> bool:
 
 
 def collect_fragments(binding: Dict[str, Any]) -> Dict[str, List[Dict]]:
-    """ViewTypeBinding.fragments[]：命名可复用片段（t-call 等价物）。"""
+    """ViewTypeBinding.fragments[]：命名可复用片段（t-call 等价物）。
+
+    片段体取 `children`（规范 §2 权威命名）或 `elements`（兼容旧写法），
+    两者皆可；同时缺失视为空片段（call 展开为空，不静默吞错——片段名缺失由校验器报 ERROR）。
+    """
     out: Dict[str, List[Dict]] = {}
     for frag in binding.get("fragments", []) or []:
-        out[frag["name"]] = frag.get("elements", [])
+        out[frag["name"]] = frag.get("children") or frag.get("elements") or []
     return out

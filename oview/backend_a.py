@@ -76,12 +76,15 @@ def composition_action_records(
     composition: Dict,
     module: str,
     id_map: Dict[Tuple[int, str], str],
+    custom_view_xmlid: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """Composition → ir.actions.act_window(+ ir.actions.act_window.view)。
 
     返回 (action_records, act_window_view_records)。
-    id_map: {(binding_index, view_id): xml_id} 由 pipeline 注入。
+    id_map: {(binding_index, view_id): xml_id} 由 pipeline 注入（含标准与自定义视图）。
+    custom_view_xmlid: {vid: xml_id} 自定义视图 ir.ui.view 的 xml_id（供 viewType=custom 引用，G1）。
     """
+    custom_view_xmlid = custom_view_xmlid or {}
     kind = composition.get("kind", "act_window")
     base_id = composition.get("id") or f"action_{composition.get('model','x').replace('.','_')}"
     action_xid = f"{module}.{base_id}"
@@ -93,8 +96,39 @@ def composition_action_records(
             "name": composition.get("name", "DSL Action"),
             "res_model": composition["model"],
         }
-        view_mode = ",".join(vt["viewType"] for vt in composition.get("views", []))
-        fields["view_mode"] = view_mode
+        # view_mode 构建：标准类型直接列名；自定义类型（viewType=custom）经 ir.ui.view(自定义类型) 进入
+        view_mode_parts: List[str] = []
+        # view_ids 显式绑定（含标准 viewRefs 与自定义视图，统一用 awv 行关联）
+        xml_ids: List[str] = []
+        for i, vt in enumerate(composition.get("views", [])):
+            vtype = vt.get("viewType")
+            if vtype == "custom":
+                # 自定义视图进入组合（G1）：关联配套 ir.ui.view(type=自定义键)
+                ref = vt.get("ref")
+                if isinstance(ref, str):
+                    xid = custom_view_xmlid.get(ref)
+                    type_key = ref
+                elif isinstance(ref, (list, tuple)):
+                    xid = id_map.get(tuple(ref)) or custom_view_xmlid.get(ref[1])
+                    type_key = ref[1] if len(ref) > 1 else ref[0]
+                else:
+                    xid, type_key = None, None
+                if not xid:
+                    continue
+                view_mode_parts.append(type_key)  # 自定义视图类型键（如 partner_card）
+                xml_ids.append(xid)
+                awv_records.append({
+                    "xml_id": f"{module}.{base_id}_vw{i}",
+                    "model": "ir.actions.act_window.view",
+                    "fields": {
+                        "act_window_id": f"ref:{action_xid}",
+                        "view_id": f"ref:{xid}",
+                        "sequence": i,
+                    },
+                })
+            else:
+                view_mode_parts.append(vtype)
+        fields["view_mode"] = ",".join(view_mode_parts)
         if composition.get("target"):
             fields["target"] = composition["target"]
         if composition.get("domain"):
@@ -117,7 +151,6 @@ def composition_action_records(
         # view_ids 显式绑定（覆盖 view_mode 顺序/选择，G3 补全）
         view_refs = composition.get("viewRefs")
         if view_refs:
-            xml_ids: List[str] = []
             for i, ref in enumerate(view_refs):
                 if isinstance(ref, (list, tuple)):
                     xid = id_map.get(tuple(ref))
@@ -127,16 +160,16 @@ def composition_action_records(
                     continue
                 xml_ids.append(xid)
                 awv_records.append({
-                    "xml_id": f"{module}.{base_id}_vw{i}",
+                    "xml_id": f"{module}.{base_id}_vwref{i}",
                     "model": "ir.actions.act_window.view",
                     "fields": {
                         "act_window_id": f"ref:{action_xid}",
                         "view_id": f"ref:{xid}",
-                        "sequence": i,
+                        "sequence": 100 + i,
                     },
                 })
-            if xml_ids:
-                fields["_view_ids"] = xml_ids  # 渲染为 view_ids eval
+        if xml_ids:
+            fields["_view_ids"] = xml_ids  # 渲染为 view_ids eval
 
         act_records.append({"xml_id": action_xid, "model": "ir.actions.act_window", "fields": fields})
     elif kind == "dashboard":
@@ -148,6 +181,66 @@ def composition_action_records(
         }
         act_records.append({"xml_id": action_xid, "model": "ir.actions.act_window", "fields": fields})
     return act_records, awv_records
+
+
+def explicit_action_records(actions: List[Dict], module: str = "dsl_gen") -> List[Dict]:
+    """顶层 actions[] → 非视图类 opener（**怎么被打开**）：act_url / act_server。
+
+    Composition 已覆盖 act_window / client（视图类 opener）；这里补足 URL、服务端动作等
+    不绑定视图的打开方式。返回 ir.actions.act_url / ir.actions.server 记录。
+    """
+    records: List[Dict] = []
+    for a in actions or []:
+        aid = a["id"]
+        xid = f"{module}.{aid}"
+        atype = a.get("type", "url")
+        if atype == "url":
+            fields = {
+                "name": a.get("name", "Open URL"),
+                "url": a["url"],
+                "target": a.get("target", "new"),
+            }
+            records.append({"xml_id": xid, "model": "ir.actions.act_url", "fields": fields})
+        elif atype == "server":
+            fields = {
+                "name": a.get("name", "Server Action"),
+                "state": a.get("state", "code"),
+            }
+            if a.get("model"):
+                fields["model_id"] = f"ref:{a['model']}"  # 渲染为 <field name="model_id" ref="..."/>
+            if a.get("code"):
+                fields["code"] = a["code"]
+            records.append({"xml_id": xid, "model": "ir.actions.server", "fields": fields})
+    return records
+
+
+def menu_records(menus: List[Dict], module: str,
+                 resolver) -> List[Dict]:
+    """顶层 menus[] → ir.ui.menu（**挂到哪**）：把 action 挂载到导航树。
+
+    resolver(ref, kind) -> xml_id | None：解析本 DSL 内引用（composition id / explicit
+    action id / menu id）为完整 xml_id；含 '.' 的字面引用原样返回；无法解析返回 None。
+    """
+    records: List[Dict] = []
+    for m in menus or []:
+        mid = m["id"]
+        xid = f"{module}.{mid}"
+        fields: Dict[str, Any] = {"name": m["name"]}
+        action_xid = resolver(m.get("action"), kind="action") if m.get("action") else None
+        if action_xid:
+            fields["action"] = f"ref:{action_xid}"
+        if m.get("parent"):
+            parent_xid = resolver(m["parent"], kind="menu")
+            if parent_xid:
+                fields["parent_id"] = f"ref:{parent_xid}"
+        if m.get("sequence") is not None:
+            fields["sequence"] = m["sequence"]
+        if m.get("groups"):
+            fields["_groups"] = m["groups"]
+        if m.get("icon"):
+            fields["web_icon"] = m["icon"]
+        records.append({"xml_id": xid, "model": "ir.ui.menu", "fields": fields})
+    return records
 
 
 def render_data_xml(records: List[Dict], root_tag: str = "odoo") -> str:
@@ -167,6 +260,9 @@ def render_data_xml(records: List[Dict], root_tag: str = "odoo") -> str:
             elif fname == "_view_ids":
                 vids = [f"ref({v!r})" for v in fval]
                 etree.SubElement(r, "field", {"name": "view_ids", "eval": f"[(6,0,[{','.join(vids)}])]"})
+            elif isinstance(fval, str) and fval.startswith("ref:"):
+                # 任意字段的 ref 引用（menu.action / menu.parent_id / server.model_id 等）
+                etree.SubElement(r, "field", {"name": fname, "ref": fval[4:]})
             elif fname == "search_view_id":
                 etree.SubElement(r, "field", {"name": "search_view_id", "ref": str(fval)})
             elif fname == "inherit_id" or (fname == "inherit" ):

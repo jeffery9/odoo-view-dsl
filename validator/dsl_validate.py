@@ -43,6 +43,15 @@ ELEMENT_VIEW_SCOPE = {
     "header": {"form", "list"},
 }
 
+# 生成器支持的全部元素种类（DSL IR 层已知集合）。
+# 与 oview/qweb_ir.py 中的 KNOWN_KINDS 保持同步：生成器与校验器各自持有副本
+# （校验器须独立可运行，不从 oview 包 import）。变更时需同步两处。
+KNOWN_KINDS = {
+    "field", "group", "notebook", "page", "button", "separator", "label",
+    "filter", "subview", "component", "if", "foreach", "set", "slot",
+    "dynamicAttr", "call", "raw",
+}
+
 # 承载子元素的字段名（用于递归遍历）
 _CHILD_KEYS = ("children", "elements", "fallback", "block")
 _PAGE_CHILD_KEY = "pages"  # notebook.pages[].children
@@ -90,6 +99,25 @@ def check_element_scope(view_type: str, elements, view_id: Optional[str]) -> lis
             out.append(Issue(
                 "error", "ELEMENT_SCOPE_VIOLATION",
                 f"元素 <{kind}> 仅允许于 {sorted(scope)}，但出现在 {view_type} 视图",
+                view_id=view_id, element=kind,
+            ))
+    return out
+
+
+def check_unknown_kind(view_type: str, elements, view_id: Optional[str]) -> list[Issue]:
+    """未知元素种类必须被拦截（B2）：作者把 `field` 拼成 `fild` 时，
+    整条管线曾 0 error 通过却产出无效视图。这里确保「不静默降级」铁律在 IR 层生效。
+    """
+    out: list[Issue] = []
+    for el in _walk_elements(elements):
+        kind = el.get("kind")
+        if kind is None:
+            continue  # ELEMENT_NO_KIND 已由 check_element_scope 报告
+        if kind not in KNOWN_KINDS:
+            out.append(Issue(
+                "error", "ELEMENT_UNKNOWN_KIND",
+                f"未知元素种类 {kind!r}：不在 DSL 元素词汇中（可能拼写漂移，如 field→fild），"
+                f"非法 DSL 必须在此被拦截而非静默通过",
                 view_id=view_id, element=kind,
             ))
     return out
@@ -219,6 +247,8 @@ def validate_view(view: dict, model: Optional[str] = None,
                          "View 缺少 viewType（View 与 ViewTypeBinding 均未提供）",
                          view_id=vid))
     elements = view.get("elements", [])
+    # 未知种类卡控（B2）：不依赖视图类型，始终执行
+    out += check_unknown_kind(resolved_vtype or "", elements, vid)
     if resolved_vtype:
         standard = resolved_vtype in ("form", "list", "tree", "search", "graph",
                                        "pivot", "calendar", "activity", "dashboard")
@@ -248,6 +278,39 @@ def validate_binding(binding: dict, rng_dir: Optional[str] = None) -> list[Issue
         out += validate_view(v, model=model, view_type=vtype, rng_dir=rng_dir)
     # inherit 链结构（独立、跨视图）
     out += check_inherit_chain(views)
+    return out
+
+
+def check_menu_refs(spec: dict, rng_dir: Optional[str] = None) -> list[Issue]:
+    """顶层 menus[]/actions[] 引用完整性（**不静默降级**）：
+
+    - menu.action 必须指向：本 DSL 的 composition id、explicit action id，或含 '.' 的字面 xml_id；
+    - menu.parent 必须指向：本 DSL 的 menu id，或含 '.' 的字面 xml_id。
+    否则视为悬空引用并报 ERROR，避免生成指向不存在 action 的菜单。
+    """
+    out: list[Issue] = []
+    comp_ids = {c.get("id") for c in spec.get("compositions", []) or [] if c.get("id")}
+    action_ids = {a.get("id") for a in spec.get("actions", []) or [] if a.get("id")}
+    menu_ids = {m.get("id") for m in spec.get("menus", []) or [] if m.get("id")}
+
+    for m in spec.get("menus", []) or []:
+        mid = m.get("id")
+        ref = m.get("action")
+        # 容器菜单（无 action，仅作分组父节点）是合法的 Odoo 语义，不报错
+        if ref and "." not in ref and ref not in comp_ids and ref not in action_ids:
+            out.append(Issue(
+                "error", "MENU_ACTION_DANGLING",
+                f"菜单 {mid!r} 的 action {ref!r} 未指向任何 composition id / explicit action id"
+                f"（且非字面 xml_id），将生成悬空菜单",
+                view_id=mid,
+            ))
+        parent = m.get("parent")
+        if parent and "." not in parent and parent not in menu_ids:
+            out.append(Issue(
+                "error", "MENU_PARENT_DANGLING",
+                f"菜单 {mid!r} 的 parent {parent!r} 未指向任何 menu id（且非字面 xml_id）",
+                view_id=mid,
+            ))
     return out
 
 
