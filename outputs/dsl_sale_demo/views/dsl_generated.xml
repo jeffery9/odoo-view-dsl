@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='utf-8'?>
+<odoo>
+    <record id="dsl_sale_demo.sale_form_base" model="ir.ui.view">
+        <field name="arch" type="xml">
+            <form>
+                <group>
+                    <field name="partner_id"/>
+                    <field name="date_order"/>
+                    <field name="amount_total" decoration-danger="1"/>
+                </group>
+                <notebook>
+                    <page string="Order Lines">
+                        <field name="order_line"/>
+                    </page>
+                    <page string="Notes">
+                        <field name="note"/>
+                    </page>
+                </notebook>
+            </form>
+        </field>
+        <field name="name">Sale Order Form</field>
+        <field name="model">sale.order</field>
+        <field name="type">form</field>
+    </record>
+    <record id="dsl_sale_demo.sale_form_ext" model="ir.ui.view">
+        <field name="arch" type="xml">
+            <data>
+                <xpath expr="//sheet" position="inside">
+                    <button string="Validate" type="object" name="action_validate" icon="fa-check"/>
+                </xpath>
+            </data>
+        </field>
+        <field name="name">Ext: validate btn</field>
+        <field name="model">sale.order</field>
+        <field name="type">form</field>
+        <field name="mode">extension</field>
+        <field name="inherit_id" ref="dsl_sale_demo.sale_form_base"/>
+    </record>
+    <record id="dsl_sale_demo.sale_list_list_base" model="ir.ui.view">
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="partner_id"/>
+                <field name="amount_total" decoration-bf="1"/>
+            </tree>
+        </field>
+        <field name="name">Sale Order List</field>
+        <field name="model">sale.order</field>
+        <field name="type">tree</field>
+    </record>
+    <record id="dsl_sale_demo.sale_search_search_base" model="ir.ui.view">
+        <field name="arch" type="xml">
+            <search>
+                <field name="partner_id"/>
+                <filter name="my_orders" string="My Orders" domain="[['user_id', '=', 'uid']]"/>
+            </search>
+        </field>
+        <field name="name">Sale Order Search</field>
+        <field name="model">sale.order</field>
+        <field name="type">search</field>
+    </record>
+    <record id="dsl_sale_demo.action_sale_order" model="ir.actions.act_window">
+        <field name="name">Sales Orders</field>
+        <field name="res_model">sale.order</field>
+        <field name="view_mode">list,form</field>
+        <field name="target">current</field>
+        <field name="context">{'search_default_my_orders': 1}</field>
+        <field name="search_view_id" ref="dsl_sale_demo.sale_search_search_base"/>
+    </record>
+</odoo>

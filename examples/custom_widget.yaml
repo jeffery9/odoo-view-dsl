@@ -1,0 +1,38 @@
+# 自定义视图：res.partner 的 custom 类型（OWL 组件），由后端 B 生成 .js/.xml/.scss + 注册
+# DSL 主语言 = YAML（结构见 docs/dsl_qweb_owl_specification.md §2 IR，一一对应）
+module: dsl_custom_demo
+
+bindings:
+  - model: res.partner
+    viewType: custom
+    prefix: partner_card
+    custom: true
+    views:
+      - id: partner_card
+        className: PartnerCard
+        name: Partner Card
+        services:
+          - rpc
+          - notification
+        props:
+          - partnerId
+        elements:
+          - kind: group
+            children:
+              - kind: field
+                name: display_name
+              - kind: field
+                name: email
+              - kind: if
+                cond: "state === 'active'"
+                children:
+                  - kind: label
+                    string: Active
+          - kind: foreach
+            expr: records
+            as: rec
+            children:
+              - kind: field
+                name: rec.name
+
+compositions: []

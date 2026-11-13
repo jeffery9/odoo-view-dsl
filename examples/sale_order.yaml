@@ -1,0 +1,89 @@
+# 标准视图 + 组合：sale.order 的 form / list / search 三类型，经 act_window 组合成最终屏幕
+# DSL 主语言 = YAML（结构见 docs/dsl_qweb_owl_specification.md §2 IR，一一对应）
+module: dsl_sale_demo
+
+bindings:
+  - model: sale.order
+    viewType: form
+    prefix: sale_form
+    views:
+      - id: base
+        mode: primary
+        name: Sale Order Form
+        elements:
+          - kind: group
+            children:
+              - kind: field
+                name: partner_id
+              - kind: field
+                name: date_order
+              - kind: field
+                name: amount_total
+                extra:
+                  "decoration-danger": "1"
+          - kind: notebook
+            pages:
+              - string: Order Lines
+                children:
+                  - kind: field
+                    name: order_line
+              - string: Notes
+                children:
+                  - kind: field
+                    name: note
+      - id: ext
+        mode: extension
+        inherit: base
+        name: "Ext: validate btn"
+        patches:
+          - xpath: "//sheet"
+            position: inside
+            elements:
+              - kind: button
+                string: Validate
+                type: object
+                name: action_validate
+                icon: fa-check
+
+  - model: sale.order
+    viewType: list
+    prefix: sale_list
+    views:
+      - id: list_base
+        mode: primary
+        name: Sale Order List
+        elements:
+          - kind: field
+            name: name
+          - kind: field
+            name: partner_id
+          - kind: field
+            name: amount_total
+            extra:
+              "decoration-bf": "1"
+
+  - model: sale.order
+    viewType: search
+    prefix: sale_search
+    views:
+      - id: search_base
+        mode: primary
+        name: Sale Order Search
+        elements:
+          - kind: field
+            name: partner_id
+          - kind: filter
+            name: my_orders
+            string: My Orders
+            domain: [["user_id", "=", "uid"]]
+
+compositions:
+  - kind: act_window
+    model: sale.order
+    name: Sales Orders
+    views:
+      - viewType: list
+      - viewType: form
+    searchViewRef: [2, "search_base"]
+    target: current
+    context: "{'search_default_my_orders': 1}"
