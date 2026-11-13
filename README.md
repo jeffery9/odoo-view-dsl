@@ -16,6 +16,7 @@
 | :--- | :--- | :--- |
 | **设计规范** | `docs/dsl_qweb_owl_specification.md` | 四层模型（Element → View → ViewTypeBinding → Composition）+ QWeb/OWL 定位 + 校验约束，唯一事实来源 |
 | **生成器** | `oview/` | 两个编译后端：标准视图 → `ir.ui.view`；自定义视图 → OWL 三件套 |
+| **反向转换** | `oview/to_dsl.py` | Odoo 视图 arch → DSL（把存量视图迁移进 `designer → dsl → odoo` 工作流） |
 | **静态校验器** | `validator/` | `dsl_validate`（IR 快筛）+ `rng_validate`（RNG 终审） |
 | **结构契约** | `schema/dsl_schema.yaml`（默认）`schema/dsl_schema.json`（等价） | JSON Schema (Draft 2020-12) 形式化四层模型；编辑器校验 + 离线结构门禁 |
 | **参考样例** | `examples/` | 标准+组合、自定义 OWL 端到端样例 |
@@ -51,6 +52,37 @@ python3 -m oview.pipeline examples/custom_widget.yaml --out outputs
 
 生成后自动串联校验：`dsl_validate`(IR 快筛) → 生成 arch → `rng_validate`(RNG 终审)。
 
+## 反向转换：Odoo 视图 → DSL（`oview/to_dsl.py`）
+
+把**已有的 Odoo 视图**（ir.ui.view 的 arch XML，或单段 arch 片段）反转为 DSL，
+用于把存量视图迁移进 `designer → dsl → odoo` 工作流（先在 designer 里可视化编辑，再生成）。
+
+```bash
+# 含 ir.ui.view record 的 data XML（单次或批量）→ DSL YAML
+python3 -m oview.to_dsl views.xml --model sale.order --out sale_dsl.yaml
+
+# 纯 arch 片段（根即 form/tree/search…）→ 需 --model 指明模型
+python3 -m oview.to_dsl form_fragment.xml --model sale.order
+
+# 想拿 JSON 而非 YAML
+python3 -m oview.to_dsl views.xml --json
+```
+
+### 转换策略（与正向生成器对称）
+
+- **结构化映射**：`field` `group` `notebook`/`page` `button` `separator` `label` `filter` 干净反转为对应 DSL Element；属性（`string`/`widget`/`invisible`/`readonly`/`required`/`domain`/`context`/`groups`/`col`/`colspan`/`options`…）原样保留，`decoration-*` 等长尾进 `extra`。
+- **`attrs` 单键提取**：`attrs="{'invisible': [...]}"` 提取为 `invisible` 字段；多键/未知键无法干净表达 → 整段 `raw` 逃逸（不丢信息）。
+- **`raw` 逃逸舱**：不在 DSL 元素词汇的标签（如 `<newline>`、`<searchpanel>`）整段保留为 `raw`（必带 `reason`），保证产物通过 schema 校验且可回写为原文。
+- **`header`/`sheet`/`div` 穿透**：纯布局容器无 DSL 对应概念，展开其子元素（如 header 内的 button 上提到表单顶层），避免整段 raw 把内部结构吞掉。
+- **inherit → extension**：同文件内继承（`<field name="inherit_id" ref="..."/>`）反转为 `mode: extension` + `inherit` + `patches`（xpath/position 还原）；跨模块继承无法干净表达 → 整段 `raw` 并告警。
+- **多视图聚合**：同一 `(model, viewType)` 的多个 ir.ui.view 自动聚成一个 ViewTypeBinding。
+
+### 已知限制
+
+- **`compositions` / `actions` / `menus` 不反向生成**：它们来自 Odoo 其它记录（`ir.actions.act_window` / `ir.ui.menu`），输出头部已注明「请手工补充」。
+- **跨模块 inherit** 降级为 `raw` 整段（避免悬空 inherit 引用）。
+- 反向产物经正向 `pipeline` round-trip 已验证：`button.class`、`field.options`、attrs 提取等均能完整写回 arch（正向生成器已同步增强以支持这两项）。
+
 ## 目录结构
 
 ```
@@ -62,6 +94,7 @@ oview/
   backend_a.py    # 标准：View→ir.ui.view(primary/extension)；Composition→act_window
   backend_b.py    # 自定义：View→OWL 三件套 + 注册
   pipeline.py     # 校验→生成→落盘 主链路
+  to_dsl.py       # 反向转换：Odoo 视图 arch → DSL（存量迁移）
 validator/        # vendored：dsl_validate.py + rng_validate.py（来自 odoo-qweb-diagnostics）
 schema/           # dsl_schema.yaml（默认）+ dsl_schema.json（等价）：JSON Schema 结构契约 + validate.py（自检脚本）
 examples/         # sale_order.yaml（标准+组合）、custom_widget.yaml（OWL）、partner_combo.yaml（组合含自定义视图 G1/G2）
