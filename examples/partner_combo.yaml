@@ -1,0 +1,81 @@
+# 组合示例：res.partner 的「标准 list」+「自定义 OWL 视图」经同一个 act_window 组合（G1/G2 闭环）
+# - 自定义视图由后端 B 生成 OWL 三件套 + ir.ui.view(type=partner_card) + view_registry 注册
+# - Composition 通过 viewType: custom + ref 引用该自定义视图，使其进入 act_window 的 view_mode
+# DSL 主语言 = YAML
+module: dsl_partner_combo
+
+bindings:
+  - model: res.partner
+    viewType: list
+    prefix: partner_list
+    views:
+      - id: list_base
+        mode: primary
+        name: Partner List
+        elements:
+          - kind: field
+            name: name
+          - kind: field
+            name: email
+          - kind: field
+            name: is_company
+
+  - model: res.partner
+    viewType: custom
+    prefix: partner_card
+    custom: true
+    views:
+      - id: partner_card
+        className: PartnerCard
+        name: Partner Card
+        services:
+          - rpc
+        props:
+          - partnerId
+        elements:
+          - kind: group
+            children:
+              - kind: field
+                name: display_name
+              - kind: field
+                name: email
+              - kind: if
+                cond: "state === 'active'"
+                children:
+                  - kind: label
+                    string: Active
+
+compositions:
+  - kind: act_window
+    id: partner_action          # 给 Composition 一个 id，供 menus 引用其生成的 action
+    model: res.partner
+    name: Partners (List + Custom Card)
+    views:
+      - viewType: list
+      - viewType: custom
+        ref: partner_card        # 引用自定义视图（id），进入 view_mode + ir.actions.act_window.view
+    target: current
+
+# 怎么被打开 / 挂到哪：显式 opener + 导航菜单
+actions:
+  - id: open_docs
+    type: url
+    name: Partner 文档
+    url: https://www.odoo.com/documentation
+    target: new
+
+menus:
+  - id: partner_root
+    name: 合作伙伴
+    sequence: 10
+  - id: partner_menu
+    name: 合作伙伴列表（组合视图）
+    parent: partner_root         # 挂到上面那个菜单下
+    action: partner_action       # 指向 Composition 生成的 ir.actions.act_window
+    sequence: 10
+  - id: partner_docs_menu
+    name: 伙伴文档（外链）
+    parent: partner_root
+    action: open_docs           # 指向 explicit url action
+    sequence: 20
+
