@@ -1,0 +1,29 @@
+{
+  "name": "res.partner",
+  "label": "联系人 / 客户",
+  "fields": [
+    { "name": "name",          "type": "char",       "string": "名称",     "required": true },
+    { "name": "display_name",  "type": "char",       "string": "显示名称" },
+    { "name": "email",         "type": "char",       "string": "邮箱",     "widget": "email" },
+    { "name": "phone",         "type": "char",       "string": "电话",     "widget": "phone" },
+    { "name": "mobile",        "type": "char",       "string": "手机",     "widget": "phone" },
+    { "name": "website",       "type": "char",       "string": "网站",     "widget": "url" },
+    { "name": "title",         "type": "many2one",   "string": "称谓",     "relation": "res.partner.title" },
+    { "name": "is_company",    "type": "boolean",    "string": "是公司" },
+    { "name": "active",        "type": "boolean",    "string": "有效" },
+    { "name": "category_id",   "type": "many2many",  "string": "标签",     "relation": "res.partner.category" },
+    { "name": "company_id",    "type": "many2one",   "string": "公司",     "relation": "res.company" },
+    { "name": "country_id",    "type": "many2one",   "string": "国家",     "relation": "res.country" },
+    { "name": "state_id",      "type": "many2one",   "string": "省/州",    "relation": "res.country.state" },
+    { "name": "street",        "type": "char",       "string": "街道" },
+    { "name": "street2",       "type": "char",       "string": "街道2" },
+    { "name": "city",          "type": "char",       "string": "城市" },
+    { "name": "zip",           "type": "char",       "string": "邮编" },
+    { "name": "comment",       "type": "text",       "string": "内部备注" },
+    { "name": "customer_rank", "type": "integer",    "string": "客户级别" },
+    { "name": "supplier_rank", "type": "integer",    "string": "供应商级别" },
+    { "name": "credit_limit",  "type": "monetary",   "string": "信用额度", "relation": "res.currency" },
+    { "name": "create_date",   "type": "datetime",   "string": "创建时间" },
+    { "name": "write_date",    "type": "datetime",   "string": "最后更新" }
+  ]
+}
