@@ -1,0 +1,216 @@
+/* =========================================================================
+ * Odoo View DSL · Designer — 画布仿真样式
+ * 近似 Odoo 社区（Community）浅色主题的表单 / 列表 / 搜索视图外观。
+ * 仅用于设计器画布预览，不影响 DSL 产物与生成器。
+ * 类名对齐 Odoo Web：o_form_view / o_form_sheet / o_group / o_field_widget /
+ * o_notebook / o_form_statusbar 等。
+ * ========================================================================= */
+
+.o_form_view {
+  position: relative;
+  background: #f7f7f7;
+  padding: 14px;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #333;
+  font-size: 13px;
+}
+.o_form_view.o_form_editable .o_form_sheet_bg { background: #f7f7f7; }
+.o_form_sheet_bg { padding: 0; }
+.o_form_sheet {
+  background: #fff;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 22px 28px;
+  border: 1px solid #d6d6d6;
+  border-top: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+  min-height: calc(100% - 1px);
+}
+.o_form_sheet_body { margin-top: 4px; }
+.o_form_sheet_body > .o_field_widget,
+.o_form_sheet_body > .o_horizontal_separator,
+.o_form_sheet_body > .o_alert,
+.o_form_sheet_body > .o_notebook { margin-bottom: 12px; }
+
+/* 空状态 */
+.o_empty { color: #888; padding: 40px; text-align: center; font-style: italic; }
+
+/* ── 状态栏（header）── */
+.o_form_statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 3px 3px 0 0;
+  padding: 5px 16px;
+  min-height: 34px;
+  margin-bottom: 0;
+}
+.o_statusbar_buttons { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.o_statusbar_status { display: flex; align-items: center; margin-left: auto; padding-left: 12px; }
+
+/* 状态 pills（chevron 箭头状） */
+.o_statusbar_item {
+  position: relative;
+  padding: 4px 14px 4px 20px;
+  font-size: 12px;
+  color: #a0a0a0;
+  background: #f0f0f0;
+  margin-right: 2px;
+  cursor: default;
+  white-space: nowrap;
+}
+.o_statusbar_item:first-child { border-top-left-radius: 3px; border-bottom-left-radius: 3px; padding-left: 14px; }
+.o_statusbar_item:last-child { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+.o_statusbar_item::before, .o_statusbar_item::after {
+  content: ''; position: absolute; top: 0; width: 0; height: 0; border-style: solid;
+}
+.o_statusbar_item::before { left: -9px; border-width: 11px 10px 11px 0; border-color: transparent #f0f0f0 transparent transparent; }
+.o_statusbar_item::after { right: -9px; border-width: 11px 0 11px 10px; border-color: transparent transparent transparent #f0f0f0; z-index: 1; }
+.o_statusbar_item:first-child::before { display: none; }
+.o_statusbar_item:last-child::after { display: none; }
+.o_statusbar_item.active { background: #21b799; color: #fff; }
+.o_statusbar_item.active::before { border-right-color: #21b799; }
+.o_statusbar_item.active::after { border-left-color: #21b799; }
+
+/* ── 按钮（对齐 Odoo .btn）── */
+.btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 12px; border: 1px solid #ced4da; border-radius: 3px;
+  background: #fff; font-size: 13px; color: #333; cursor: pointer; line-height: 1.4;
+}
+.btn:hover { filter: brightness(.97); }
+.btn-primary { background: #21b799; border-color: #1aa083; color: #fff; }
+.btn-secondary { background: #fff; color: #333; }
+.btn-danger { background: #dc3545; border-color: #c82333; color: #fff; }
+.btn.o_inline_btn { margin: 2px 0; }
+
+/* ── 分组（group）── */
+.o_group.o_inner_group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+  row-gap: 8px;
+  margin-bottom: 16px;
+}
+.o_group.o_inner_group.col1 { grid-template-columns: minmax(0, 1fr); }
+.o_group.o_inner_group.col3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.o_horizontal_separator {
+  grid-column: 1 / -1;
+  font-weight: 600; font-size: 14px; color: #333;
+  margin: 6px 0 4px; border-bottom: 1px solid #e0e0e0; padding-bottom: 2px;
+}
+
+/* ── 字段控件（field widget）── */
+.o_field_widget { display: flex; flex-direction: column; position: relative; cursor: pointer; }
+.o_form_label { font-size: 12px; color: #666; margin-bottom: 2px; }
+.o_form_label .o_required { color: #d9534f; }
+.o_form_label.o_standalone { font-size: 13px; font-weight: 600; color: #333; margin: 8px 0; }
+.o_ctl { position: relative; }
+
+.o_input {
+  width: 100%; padding: 5px 8px; border: 1px solid #ced4da; border-radius: 3px;
+  background: #fff; font-size: 13px; color: #333; font-family: inherit;
+}
+.o_input:focus { border-color: #21b799; outline: none; box-shadow: 0 0 0 2px rgba(33, 183, 153, .15); }
+select.o_input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, #666 50%), linear-gradient(135deg, #666 50%, transparent 50%); background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 24px; }
+
+.o_field_widget.o_required_modifier .o_input { border-color: #d9534f; }
+.o_field_widget.o_readonly_modifier .o_input { background: #f5f5f5; border: none; padding-left: 0; }
+.o_field_widget.o_readonly_modifier { color: #333; }
+.o_readonly_value { padding: 5px 0; color: #333; }
+
+.o_field_widget.o_invisible_modifier { display: none !important; }
+
+/* many2one 放大镜 */
+.o_field_many2one .o_ctl::after,
+.o_field_widget.o_field_many2one .o_ctl::after {
+  content: "🔍"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  opacity: .5; pointer-events: none; font-size: 12px;
+}
+
+/* many2many 标签 */
+.o_field_many2manytags {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  min-height: 30px; border: 1px solid #ced4da; border-radius: 3px; padding: 3px 6px; background: #fff;
+}
+.o_tag { display: inline-flex; align-items: center; gap: 4px; background: #e9f3f1; color: #1a7f6b; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.o_tag .x { cursor: pointer; opacity: .7; }
+.o_field_many2manytags .add { color: #999; cursor: pointer; }
+
+/* boolean */
+.o_field_boolean { width: 16px; height: 16px; align-self: flex-start; margin-top: 4px; }
+
+/* radio */
+.o_radio_group { display: flex; flex-wrap: wrap; gap: 12px; }
+.o_radio { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+
+/* 日期选择器 */
+.o_datepicker .o_ctl::after {
+  content: "📅"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  opacity: .6; pointer-events: none; font-size: 12px;
+}
+
+/* 数字 / 货币 */
+.o_field_monetary .o_ctl::before { content: "¤"; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #888; font-size: 12px; }
+.o_field_monetary .o_ctl .o_input { padding-left: 20px; }
+
+/* 附件 / 图片 */
+.o_attachment { border: 1px dashed #ced4da; border-radius: 3px; padding: 12px; text-align: center; color: #888; background: #fafafa; }
+
+/* 类型徽标 */
+.o_typebadge { font-size: 11px; color: #888; margin-top: 2px; }
+
+/* 选中高亮 */
+.o_field_widget.sel, .o_group.sel, .o_notebook.sel, .o_alert.sel, .o_form_label.sel {
+  outline: 2px solid #21b799; outline-offset: 1px; border-radius: 3px;
+}
+
+/* ── 笔记本（notebook）── */
+.o_notebook { margin: 8px 0 16px; }
+.o_notebook_headers { display: flex; border-bottom: 1px solid #dee2e6; }
+.o_notebook_tab {
+  padding: 8px 16px; font-size: 13px; cursor: pointer;
+  border-bottom: 2px solid transparent; color: #555;
+}
+.o_notebook_tab:hover { background: #f7f7f7; }
+.o_notebook_tab.active { border-bottom-color: #21b799; color: #21b799; font-weight: 600; }
+.o_notebook .tab-pane { padding: 12px 4px; }
+
+/* ── 列表视图（one2many / list viewType）── */
+.o_list_view { border: 1px solid #dee2e6; border-radius: 3px; overflow: hidden; margin: 4px 0; background: #fff; }
+.o_list_table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.o_list_table th {
+  background: #f3f3f3; text-align: left; padding: 6px 10px;
+  border-bottom: 1px solid #dee2e6; font-weight: 600; color: #555; white-space: nowrap;
+}
+.o_list_table td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; color: #333; }
+.o_list_table tbody tr:hover { background: #f9f9f9; }
+.o_list_add { display: block; padding: 6px 10px; color: #21b799; font-size: 12px; cursor: pointer; background: #fff; border-top: 1px solid #eee; }
+.o_list_add:hover { background: #eafaf6; }
+
+/* ── 搜索视图 ── */
+.o_search_panel { padding: 8px 0; }
+.o_search_title { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.o_search_filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.o_search_chip {
+  display: inline-flex; align-items: center; padding: 4px 12px;
+  border: 1px solid #ced4da; border-radius: 14px; background: #fff; font-size: 12px; cursor: pointer;
+}
+.o_search_chip:hover { border-color: #21b799; color: #21b799; }
+
+/* ── 逻辑 / 未知 标注 ── */
+.o_alert {
+  font-size: 12px; padding: 6px 10px; border-radius: 3px;
+  background: #fff3cd; border: 1px solid #ffe69c; color: #7a5b00; margin: 6px 0;
+}
+.o_alert.logic { background: #eef3ff; border-color: #cdd8f3; color: #335; }
+.o_alert.sel { outline: 2px solid #21b799; outline-offset: 1px; }
+
+/* ── 落位区 ── */
+.o_form_dropzone {
+  border: 2px dashed #cfd8dc; border-radius: 6px; padding: 10px;
+  text-align: center; color: #888; font-size: 12px; margin: 8px 0; cursor: copy;
+}
+.o_form_dropzone.over { border-color: #21b799; background: #eafaf6; color: #1a7f6b; }
