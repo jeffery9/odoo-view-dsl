@@ -22,6 +22,17 @@
 5. **高级 QWeb 不再漏缝（§3.1）**：`t-if`/`t-foreach`/`t-set`/`t-call`/`t-slot`/动态属性已提升为一等 `Element`；`raw` 降级进 QWeb IR 内部（不绕过管线），并由 QA 打 `seam` 警告逼回声明式。View 始终是唯一事实来源。
 6. **DSL 主语言为 YAML**：作者以 YAML 书写规范（可读性最佳、支持注释与多行块），本仓库 `examples/*.yaml` 为权威样例；JSON 仅作兼容/程序生成用途，加载器二者皆收。§2 的 TypeScript 类型仅作**形式化描述**，实际书写/解析/落盘均为 YAML。
 
+7. **一句话使命（双面定位）：** DSL 用来自**快速使用原生 view type 与原生 view element**，也用来**精确定义自定义 view type 与自定义 view element**。
+   - **快速使用原生（加速面）**：`form/list/tree/search/graph/pivot/calendar/activity/dashboard` 等原生类型及其元素，用 17 种一等 `kind` 声明式书写，`inherit`/`Composition` 一键组合；由后端 A 生成 `ir.ui.view` + `act_window`，省去手写 arch 与 xpath。
+   - **精确定义自定义（表达面）**：`binding.custom: true` 经后端 B **完整生成** OWL 三件套 + `ir.ui.view(type=<vid>)` + `view_registry` 注册 + `ir.actions.client`，并可经 `viewType: custom + ref` 进入 `act_window.view_mode`（G1/G2）。
+   - **边界（务必分清）**：DSL **精确"定义并接入"自定义元素**（`kind: component` 引用 + View 级 `className`/`services`/`props` 塑造契约与挂载点）；但一个**全新 OWL 元素的行为实现（JS 逻辑）本身就是 OWL 代码，正确下沉到 OWL，不由 DSL 替写**。即：自定义元素"定义/接入"归 DSL，"实现"归 OWL。这与「DSL 是 QWeb 的加速层而非替代」一脉相承。
+
+8. **「怎么被打开、挂到哪」是一等语义组件（actions + menus）**：原生 DSL 此前只覆盖"视图定义"，打开方式（action）由 Composition 隐式生成、挂载位置（菜单）完全缺席。现补为两个顶层语义组件：
+   - **`compositions[]`**（已存在）→ 生成 `ir.actions.act_window` / `client`（视图类 opener，即"怎么被打开"的主流）。
+   - **`actions[]`**（新增）→ 非视图类 opener：`type: url`（`ir.actions.act_url`）/ `type: server`（`ir.actions.server`），补足 URL、服务端动作等不绑定视图的打开方式。
+   - **`menus[]`**（新增）→ `ir.ui.menu`（"挂到哪"）：把 action 挂载到导航树；`action` 指向 composition id / explicit action id / 字面 xml_id；`parent` 指向 menu id / 字面 xml_id；**容器菜单（无 `action`）合法**，仅作分组父节点。
+   - **引用完整性（不静默降级）**：`dsl_validate.check_menu_refs` 在生成前校验 `menu.action` / `menu.parent` 不悬空（指向未知 id 且非字面 xml_id 即报 `MENU_ACTION_DANGLING` / `MENU_PARENT_DANGLING` ERROR），避免生成指向不存在 action 的菜单。结构化校验（必填/类型）归 JSON Schema；引用完整性归 IR 校验器，两层各司其职。
+
 > 关键纠正演进：① 不把"标准/自定义"当平行 DSL；② `model` 是 View 层必填绑定；③ 引入 Element 与 Composition；④ 一个 (model, viewType) 由**一组 views** 定义，靠 **`inherit` 继承扩展**，合并结果 = 该 view type 的最终结果；⑤ **缝修复**：高频高级 QWeb 指令提升为一等 `Element`，`raw` 降级进 QWeb IR（不绕过管线）+ QA `seam` 告警，恢复 View 单一来源；⑥ **主语言定为 YAML**（声明式、可读、可注释）。
 
 ---
