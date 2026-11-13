@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://odoo-view-dsl/schema/dsl_schema.json",
+  "title": "Odoo 统一视图 DSL（Unified View DSL）",
+  "description": "统一视图 DSL 的结构契约（JSON Schema Draft 2020-12）。覆盖四层模型：Element → View → ViewTypeBinding(inherit 合并) → Composition，与 docs/dsl_qweb_owl_specification.md §2 IR 一一对应；YAML/JSON 书写均适用（加载器二者皆收）。本 schema 的 kind 枚举对齐「已实现」的生成器/校验器 KNOWN_KINDS；spec §2 还列出的 image/html/newline/header/searchpanel/groupby/control 尚未进入生成器，故此处暂不纳入枚举，以免放过生成器会拒绝的输入。属性长尾一律走 field.extra（Record）或元素级 additionalProperties，符合规范「奥卡姆 + 不静默降级」。",
+  "type": "object",
+  "required": ["module", "bindings"],
+  "additionalProperties": false,
+  "properties": {
+    "module": {
+      "type": "string",
+      "minLength": 1,
+      "description": "生成模块技术名（Odoo 模块命名约定：小写 + 下划线）"
+    },
+    "bindings": {
+      "type": "array",
+      "minItems": 1,
+      "description": "ViewTypeBinding 列表：每个 (model, viewType) 下的一组 View",
+      "items": { "$ref": "#/$defs/ViewTypeBinding" }
+    },
+    "compositions": {
+      "type": "array",
+      "description": "Composition 列表：多个 view type 的最终结果组合为屏幕",
+      "items": { "$ref": "#/$defs/Composition" }
+    },
+    "actions": {
+      "type": "array",
+      "description": "顶层 actions[]：非视图类 opener（怎么被打开）—— act_url / act_server。视图类 opener 由 Composition 生成（ir.actions.act_window / client）",
+      "items": { "$ref": "#/$defs/Action" }
+    },
+    "menus": {
+      "type": "array",
+      "description": "顶层 menus[]：ir.ui.menu（挂到哪）——把 action 挂到导航树。menu.action 指向 composition id / explicit action id / 字面 xml_id；parent 指向 menu id / 字面 xml_id",
+      "items": { "$ref": "#/$defs/Menu" }
+    }
+  },
+  "$defs": {
+    "Expr": {
+      "description": "Odoo 表达式：字符串表达式（如 'state==\"active\"'）或原生结构（domain/context 的列表，如 [['user_id','=','uid']]）",
+      "type": ["string", "array", "boolean", "number", "null"]
+    },
+    "Value": {
+      "description": "dynamicAttr 的 value：单值字符串（attr/f 模式）或 dict（map 模式，按 dict 设置多属性）",
+      "type": ["string", "object", "array", "number", "boolean", "null"]
+    },
+    "RefOrString": {
+      "description": "视图引用：字符串 xml_id，或 [binding_index, view_id] 二元组",
+      "type": ["string", "array"],
+      "items": { "type": ["string", "integer"] }
+    },
+    "Element": {
+      "type": "object",
+      "required": ["kind"],
+      "description": "原子结构单元。kind 判别字段；其余字段按 kind 选用（见各 if/then 必填约束）。",
+      "properties": {
+        "kind": {
+          "enum": [
+            "field", "group", "notebook", "page", "button", "separator", "label",
+            "filter", "subview", "component", "if", "foreach", "set", "slot",
+            "dynamicAttr", "call", "raw"
+          ]
+        },
+        "name": { "type": "string" },
+        "string": { "type": "string" },
+        "groups": { "type": "string" },
+        "invisible": { "$ref": "#/$defs/Expr" },
+        "readonly": { "$ref": "#/$defs/Expr" },
+        "required": { "$ref": "#/$defs/Expr" },
+        "domain": { "$ref": "#/$defs/Expr" },
+        "context": { "$ref": "#/$defs/Expr" },
+        "options": { "type": "object" },
+        "widget": { "type": "string" },
+        "col": { "type": "integer", "minimum": 1 },
+        "colspan": { "type": "integer", "minimum": 1 },
+        "icon": { "type": "string" },
+        "type": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "confirm": { "type": "string" },
+        "help": { "type": "string" },
+        "for": { "type": "string" },
+        "nolabel": { "type": "boolean" },
+        "expr": { "$ref": "#/$defs/Expr" },
+        "cond": { "$ref": "#/$defs/Expr" },
+        "as": { "type": "string" },
+        "var": { "type": "string" },
+        "value": { "$ref": "#/$defs/Value" },
+        "attr": { "type": "string" },
+        "mode": { "enum": ["attr", "f", "map"], "description": "dynamicAttr 模式：attr→t-att-{name}；f→t-attf-{name}；map→t-att(dict)" },
+        "viewRef": { "type": "string" },
+        "component": { "type": "string" },
+        "props": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Expr" } },
+        "else": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "fallback": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "with": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Expr" } },
+        "qweb": { "type": "string", "description": "raw 逃逸舱的 QWeb 片段" },
+        "reason": { "type": "string", "description": "raw 必带：说明为何 DSL 无法表达" },
+        "extra": {
+          "type": "object",
+          "description": "field 属性长尾（decoration-*/digits/filename…）→ 逐键降级为 arch 属性",
+          "additionalProperties": true
+        },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "pages": { "type": "array", "items": { "$ref": "#/$defs/Page" } },
+        "className": { "type": "string", "description": "自定义视图：OWL 组件类名" },
+        "services": { "type": "array", "items": { "type": "string" }, "description": "自定义视图：显式声明的 OWL services" },
+        "priority": { "type": "integer" }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "field" } } }, "then": { "required": ["name"] } },
+        { "if": { "properties": { "kind": { "const": "notebook" } } }, "then": { "required": ["pages"] } },
+        { "if": { "properties": { "kind": { "const": "page" } } }, "then": { "required": ["string"] } },
+        { "if": { "properties": { "kind": { "const": "button" } } }, "then": { "required": ["string"] } },
+        { "if": { "properties": { "kind": { "const": "filter" } } }, "then": { "required": ["name"] } },
+        { "if": { "properties": { "kind": { "const": "subview" } } }, "then": { "required": ["viewRef"] } },
+        { "if": { "properties": { "kind": { "const": "component" } } }, "then": { "required": ["component"] } },
+        { "if": { "properties": { "kind": { "const": "if" } } }, "then": { "required": ["cond"] } },
+        { "if": { "properties": { "kind": { "const": "foreach" } } }, "then": { "required": ["expr", "as"] } },
+        { "if": { "properties": { "kind": { "const": "set" } } }, "then": { "required": ["var"] } },
+        { "if": { "properties": { "kind": { "const": "slot" } } }, "then": { "required": ["name"] } },
+        { "if": { "properties": { "kind": { "const": "dynamicAttr" } } }, "then": { "required": ["attr", "value"] } },
+        { "if": { "properties": { "kind": { "const": "call" } } }, "then": { "required": ["name"] } },
+        { "if": { "properties": { "kind": { "const": "raw" } } }, "then": { "required": ["qweb", "reason"] } }
+      ]
+    },
+    "Page": {
+      "type": "object",
+      "required": ["string"],
+      "description": "notebook 的页（form 专属）",
+      "properties": {
+        "string": { "type": "string" },
+        "groups": { "type": "string" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/Element" } }
+      },
+      "additionalProperties": true
+    },
+    "View": {
+      "type": "object",
+      "required": ["id"],
+      "description": "单条视图定义（→ ir.ui.view 一条记录）。model/viewType 以绑定层为权威，View 可覆写。",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "model": { "type": "string" },
+        "viewType": { "type": "string" },
+        "mode": { "enum": ["primary", "extension"], "default": "primary" },
+        "inherit": { "type": "string", "description": "父视图 id（→ inherit_id）；extension 必填" },
+        "priority": { "type": "integer" },
+        "groups": { "type": "string" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "patches": { "type": "array", "items": { "$ref": "#/$defs/Patch" } },
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "该视图引用的模型字段（供校验；可选）" },
+        "className": { "type": "string", "description": "自定义视图：OWL 组件类名" },
+        "services": { "type": "array", "items": { "type": "string" } },
+        "props": { "type": "array", "items": { "type": "string" }, "description": "自定义视图：prop 名列表" },
+        "context": { "$ref": "#/$defs/Expr", "description": "自定义视图：action context" }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "extension" } }, "required": ["mode"] },
+          "then": { "required": ["inherit"] }
+        }
+      ]
+    },
+    "Patch": {
+      "type": "object",
+      "required": ["xpath", "position"],
+      "description": "extension 视图对父 arch 的 xpath/position 修改（→ Odoo inherit 机制）",
+      "properties": {
+        "xpath": { "type": "string" },
+        "position": { "enum": ["inside", "after", "before", "replace", "attributes"] },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "attrs": { "type": "array", "items": { "$ref": "#/$defs/AttrPatch" } }
+      },
+      "additionalProperties": true
+    },
+    "AttrPatch": {
+      "type": "object",
+      "required": ["name"],
+      "description": "Patch 的 attributes 模式：设置单个属性",
+      "properties": {
+        "name": { "type": "string" },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "Fragment": {
+      "type": "object",
+      "required": ["name"],
+      "description": "命名可复用 QWeb 片段（t-name 等价），供元素 call 引用。body 取 children 或 elements（生成器两者皆读，兼容）。",
+      "properties": {
+        "name": { "type": "string" },
+        "params": { "type": "array", "items": { "type": "string" } },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/Element" } }
+      },
+      "additionalProperties": true,
+      "anyOf": [
+        { "required": ["children"] },
+        { "required": ["elements"] }
+      ]
+    },
+    "ViewTypeBinding": {
+      "type": "object",
+      "required": ["model", "viewType", "views"],
+      "description": "视图类型绑定：某 (model, viewType) 下的一组 View，经 inherit 链接合并为该类型最终结果。",
+      "properties": {
+        "model": { "type": "string" },
+        "viewType": { "type": "string" },
+        "prefix": { "type": "string", "description": "生成 xml_id 前缀" },
+        "custom": { "type": "boolean", "description": "是否为自定义（OWL）视图类型" },
+        "groups": { "type": "string", "description": "绑定级访问控制" },
+        "fragments": { "type": "array", "items": { "$ref": "#/$defs/Fragment" } },
+        "views": { "type": "array", "items": { "$ref": "#/$defs/View" }, "minItems": 1 }
+      },
+      "additionalProperties": false
+    },
+    "CompositionViewRef": {
+      "type": "object",
+      "required": ["viewType"],
+      "description": "Composition 引用的一个 view type 最终结果。",
+      "properties": {
+        "viewType": { "type": "string" },
+        "ref": { "type": "string", "description": "自定义视图：引用其 id（进入 view_mode + ir.actions.act_window.view）" }
+      },
+      "additionalProperties": false
+    },
+    "Composition": {
+      "type": "object",
+      "required": ["kind", "name", "model", "views"],
+      "description": "组合：多个 view type 的最终结果 → 最终屏幕（act_window / dashboard）。",
+      "properties": {
+        "kind": { "enum": ["act_window", "dashboard"] },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "model": { "type": "string" },
+        "views": { "type": "array", "items": { "$ref": "#/$defs/CompositionViewRef" }, "minItems": 1 },
+        "viewMode": { "type": "string", "description": "显式 view_mode（如 'list,form'）；缺省由 views 推导" },
+        "searchViewRef": { "$ref": "#/$defs/RefOrString" },
+        "viewRefs": { "type": "array", "items": { "$ref": "#/$defs/RefOrString" } },
+        "target": { "enum": ["current", "new", "inline", "fullscreen", "main", "popup"] },
+        "domain": { "$ref": "#/$defs/Expr" },
+        "context": { "$ref": "#/$defs/Expr" },
+        "limit": { "type": "integer" },
+        "groups": { "type": "string" },
+      "layout": { "type": "object", "description": "dashboard 布局（tabs/columns/grid）" }
+    },
+    "additionalProperties": true
+  },
+  "Action": {
+    "type": "object",
+    "required": ["id", "type"],
+    "description": "非视图类 opener（怎么被打开）。act_url / act_server；视图类 opener 由 Composition 生成。",
+    "properties": {
+      "id": { "type": "string" },
+      "type": { "enum": ["url", "server"], "description": "url→ir.actions.act_url；server→ir.actions.server" },
+      "name": { "type": "string" },
+      "url": { "type": "string", "description": "type=url：目标地址" },
+      "target": { "enum": ["new", "self", "download"], "description": "type=url：打开方式（默认 new）" },
+      "model": { "type": "string", "description": "type=server：目标模型 xml_id（ref）" },
+      "code": { "type": "string", "description": "type=server：Python 代码（state=code）" },
+      "state": { "type": "string", "description": "type=server：动作状态机（默认 code）" }
+    },
+    "additionalProperties": true
+  },
+  "Menu": {
+    "type": "object",
+    "required": ["id", "name"],
+    "description": "ir.ui.menu（挂到哪）：把 action 挂载到导航。action 指向 composition id / explicit action id / 字面 xml_id（容器菜单可省略，仅作分组父节点）；parent 指向 menu id / 字面 xml_id。",
+    "properties": {
+      "id": { "type": "string" },
+      "name": { "type": "string" },
+      "action": { "type": "string" },
+      "parent": { "type": "string", "description": "父菜单 id（本 DSL menu id 或字面 xml_id）；缺省挂到根" },
+      "sequence": { "type": "integer" },
+      "groups": { "type": "string" },
+      "icon": { "type": "string", "description": "web_icon（如 'module,icon.png'）" }
+    },
+    "additionalProperties": false
+  }
+}
+}
