@@ -1,0 +1,12 @@
+# 编辑器临时文件
+*.swp
+.swp
+*~
+# macOS
+.DS_Store
+**/.DS_Store
+# Python
+__pycache__/
+*.pyc
+# 生成产物（pipeline 输出）
+outputs/
