@@ -1,0 +1,24 @@
+{
+  "name": "sale.order",
+  "label": "销售订单",
+  "fields": [
+    { "name": "name",           "type": "char",      "string": "单号",     "readonly": true },
+    { "name": "partner_id",     "type": "many2one",  "string": "客户",     "relation": "res.partner", "required": true },
+    { "name": "partner_invoice_id", "type": "many2one", "string": "发票地址", "relation": "res.partner" },
+    { "name": "partner_shipping_id","type": "many2one","string": "送货地址", "relation": "res.partner" },
+    { "name": "company_id",     "type": "many2one",  "string": "公司",     "relation": "res.company" },
+    { "name": "date_order",     "type": "datetime",  "string": "订单日期" },
+    { "name": "validity_date",  "type": "date",      "string": "报价有效期" },
+    { "name": "state",          "type": "selection", "string": "状态",     "readonly": true },
+    { "name": "user_id",        "type": "many2one",  "string": "销售员",   "relation": "res.users" },
+    { "name": "team_id",        "type": "many2one",  "string": "销售团队", "relation": "crm.team" },
+    { "name": "pricelist_id",   "type": "many2one",  "string": "价格表",   "relation": "product.pricelist" },
+    { "name": "currency_id",    "type": "many2one",  "string": "币种",     "relation": "res.currency", "readonly": true },
+    { "name": "order_line",     "type": "one2many",  "string": "订单明细", "relation": "sale.order.line" },
+    { "name": "note",           "type": "text",      "string": "备注" },
+    { "name": "amount_untaxed", "type": "monetary",  "string": "未税金额", "readonly": true, "relation": "res.currency" },
+    { "name": "amount_tax",     "type": "monetary",  "string": "税额",     "readonly": true, "relation": "res.currency" },
+    { "name": "amount_total",   "type": "monetary",  "string": "总计",     "readonly": true, "relation": "res.currency" },
+    { "name": "invoice_status", "type": "selection", "string": "发票状态", "readonly": true }
+  ]
+}

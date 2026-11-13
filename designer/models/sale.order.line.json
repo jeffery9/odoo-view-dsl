@@ -1,0 +1,24 @@
+{
+  "name": "sale.order.line",
+  "label": "销售订单行",
+  "fields": [
+    { "name": "sequence",      "type": "integer",   "string": "序号" },
+    { "name": "name",          "type": "text",      "string": "描述" },
+    { "name": "order_id",      "type": "many2one",  "string": "订单",     "relation": "sale.order", "readonly": true },
+    { "name": "product_id",    "type": "many2one",  "string": "产品",     "relation": "product.product", "required": true },
+    { "name": "product_uom_qty","type": "float",    "string": "数量",     "required": true },
+    { "name": "product_uom",   "type": "many2one",  "string": "单位",     "relation": "uom.uom" },
+    { "name": "price_unit",    "type": "float",     "string": "单价" },
+    { "name": "discount",      "type": "float",     "string": "折扣 (%)" },
+    { "name": "tax_id",        "type": "many2many", "string": "税",       "relation": "account.tax" },
+    { "name": "customer_lead", "type": "float",     "string": "交期(天)" },
+    { "name": "price_subtotal","type": "monetary",  "string": "小计",     "readonly": true, "relation": "res.currency" },
+    { "name": "price_total",   "type": "monetary",  "string": "含税总计", "readonly": true, "relation": "res.currency" },
+    { "name": "qty_delivered", "type": "float",     "string": "已交付",   "readonly": true },
+    { "name": "qty_invoiced",  "type": "float",     "string": "已开票",   "readonly": true },
+    { "name": "qty_to_invoice","type": "float",     "string": "待开票",   "readonly": true },
+    { "name": "state",         "type": "selection", "string": "状态",     "readonly": true },
+    { "name": "currency_id",   "type": "many2one",  "string": "币种",     "relation": "res.currency", "readonly": true },
+    { "name": "company_id",    "type": "many2one",  "string": "公司",     "relation": "res.company" }
+  ]
+}
