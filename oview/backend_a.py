@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from .model import view_root_tag, normalize_binding, collect_fragments
+from .model import (view_root_tag, normalize_binding, collect_fragments,
+                    PATCH_POSITIONS, is_external_inherit)
 from .qweb_ir import element_to_node, elements_to_root, node_to_string
 
 
@@ -20,8 +21,15 @@ def view_xml_id(binding: Dict, view: Dict, module: str) -> str:
     return f"{module}.{prefix}_{view['id']}"
 
 
-def binding_view_records(binding: Dict, module: str = "dsl_gen") -> List[Dict]:
-    """ViewTypeBinding → 多条 ir.ui.view 记录（不预合并，交给 Odoo 运行时）。"""
+def binding_view_records(binding: Dict, module: str = "dsl_gen",
+                          view_elements: Optional[Dict[str, Dict]] = None) -> List[Dict]:
+    """ViewTypeBinding → 多条 ir.ui.view 记录（不预合并，交给 Odoo 运行时）。
+
+    层栈语义（规范 §4.1）：层 0 = primary 基础层（全量 elements）；其余 = 切片层
+    （extension，inherit 前序层或含 '.' 的外部基视图，内容只来自 patches）。
+    **不静默降级**：inherit 无法解析、primary 带 patches、extension 带 elements
+    都直接抛 ValueError，避免生成悬空记录或把作者的内容悄悄丢掉。
+    """
     binding = normalize_binding(binding)
     bmodel = binding["model"]
     btype = binding["viewType"]
@@ -45,25 +53,64 @@ def binding_view_records(binding: Dict, module: str = "dsl_gen") -> List[Dict]:
 
         mode = v.get("mode", "primary")
         if mode == "primary":
-            root = elements_to_root(v.get("elements", []), btype, fragments)
+            if v.get("patches"):
+                raise ValueError(
+                    f"视图 {v['id']!r} 是 primary 基础层却带 patches；"
+                    f"patches 只属于 extension 切片（会被生成器忽略）"
+                )
+            if v.get("inherit"):
+                raise ValueError(
+                    f"视图 {v['id']!r} 是 primary 基础层却带 inherit；"
+                    f"请改为 mode: extension"
+                )
+            root = elements_to_root(v.get("elements", []), btype, fragments, view_elements)
             records.append({
                 "xml_id": xid, "model": "ir.ui.view", "fields": fields,
                 "arch": node_to_string(root), "inherit": None,
             })
         else:
-            inherit_view = id_by_view.get(v["inherit"]) if v.get("inherit") else None
-            inherit_xid = view_xml_id(binding, inherit_view, module) if inherit_view else None
-            # 扩展 arch：<data> 包裹多个 <xpath>（Odoo ir_ui_view:789 认 data/xpath/position）
+            inherit_ref = v.get("inherit")
+            if not inherit_ref:
+                raise ValueError(
+                    f"切片 {v['id']!r} 缺少 inherit（本 binding 层 id 或含 '.' 的外部 xml_id）"
+                )
+            if is_external_inherit(inherit_ref):
+                # 跨模块基视图：字面 xml_id 直接作为 <field ref="..."/>
+                inherit_xid = inherit_ref
+            else:
+                inherit_view = id_by_view.get(inherit_ref)
+                if inherit_view is None:
+                    raise ValueError(
+                        f"切片 {v['id']!r} 的 inherit 目标 {inherit_ref!r} 不存在："
+                        f"既非本 binding 内层 id，也非含 '.' 的外部 xml_id；"
+                        f"拒绝生成没有 inherit_id 的悬空 extension 记录"
+                    )
+                inherit_xid = view_xml_id(binding, inherit_view, module)
+            if v.get("elements"):
+                raise ValueError(
+                    f"切片 {v['id']!r} 带 elements：生成器只消费 patches，"
+                    f"这些内容会被静默丢弃；请改写为 patches[].elements"
+                )
+
+            # 扩展 arch：<data> 包裹多个 <xpath>（Odoo ir_ui_view 认 data/xpath/position）
+            # position 决定载荷：attributes 只写 <attribute>，其余只写注入元素（§4.1）。
             data = etree.Element("data")
             for p in v.get("patches", []):
-                xp = etree.SubElement(data, "xpath",
-                                      {"expr": p["xpath"], "position": p.get("position", "inside")})
-                for el in p.get("elements", []):
-                    xp.append(element_to_node(el, btype, fragments))
-                for attr in p.get("attrs", []):
-                    a = etree.SubElement(xp, "attribute", {"name": attr["name"]})
-                    if attr.get("value") is not None:
-                        a.text = str(attr["value"])
+                pos = p.get("position", "inside")
+                if pos not in PATCH_POSITIONS:
+                    raise ValueError(
+                        f"切片 {v['id']!r} 的 patch position={pos!r} 不在 "
+                        f"{sorted(PATCH_POSITIONS)} 中"
+                    )
+                xp = etree.SubElement(data, "xpath", {"expr": p["xpath"], "position": pos})
+                if pos == "attributes":
+                    for attr in p.get("attrs", []):
+                        a = etree.SubElement(xp, "attribute", {"name": attr["name"]})
+                        if attr.get("value") is not None:
+                            a.text = str(attr["value"])
+                else:
+                    for el in p.get("elements", []):
+                        xp.append(element_to_node(el, btype, fragments, view_elements))
             fields["mode"] = "extension"
             records.append({
                 "xml_id": xid, "model": "ir.ui.view", "fields": fields,
@@ -77,14 +124,17 @@ def composition_action_records(
     module: str,
     id_map: Dict[Tuple[int, str], str],
     custom_view_xmlid: Optional[Dict[str, str]] = None,
+    custom_types: Optional[set] = None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """Composition → ir.actions.act_window(+ ir.actions.act_window.view)。
 
     返回 (action_records, act_window_view_records)。
     id_map: {(binding_index, view_id): xml_id} 由 pipeline 注入（含标准与自定义视图）。
-    custom_view_xmlid: {vid: xml_id} 自定义视图 ir.ui.view 的 xml_id（供 viewType=custom 引用，G1）。
+    custom_view_xmlid: {vid: xml_id} 自定义视图 ir.ui.view 的 xml_id（供自定义 viewType 引用，G1）。
+    custom_types: viewTypes[] 注册的类型键集合；命中时按具名自定义类型进入 view_mode。
     """
     custom_view_xmlid = custom_view_xmlid or {}
+    custom_types = custom_types or set()
     kind = composition.get("kind", "act_window")
     base_id = composition.get("id") or f"action_{composition.get('model','x').replace('.','_')}"
     action_xid = f"{module}.{base_id}"
@@ -102,20 +152,27 @@ def composition_action_records(
         xml_ids: List[str] = []
         for i, vt in enumerate(composition.get("views", [])):
             vtype = vt.get("viewType")
-            if vtype == "custom":
-                # 自定义视图进入组合（G1）：关联配套 ir.ui.view(type=自定义键)
+            if vtype == "custom" or vtype in custom_types:
+                # 自定义视图进入组合（G1）：关联配套 ir.ui.view(type=自定义键)。
+                # 具名自定义类型（viewTypes[] 注册项）用 vtype 作类型键；
+                # 兼容字面 custom 仍按 ref 推导类型键（旧样例 partner_card）。
                 ref = vt.get("ref")
                 if isinstance(ref, str):
                     xid = custom_view_xmlid.get(ref)
-                    type_key = ref
+                    legacy_key = ref
                 elif isinstance(ref, (list, tuple)):
                     xid = id_map.get(tuple(ref)) or custom_view_xmlid.get(ref[1])
-                    type_key = ref[1] if len(ref) > 1 else ref[0]
+                    legacy_key = ref[1] if len(ref) > 1 else ref[0]
                 else:
-                    xid, type_key = None, None
+                    xid, legacy_key = None, None
                 if not xid:
-                    continue
-                view_mode_parts.append(type_key)  # 自定义视图类型键（如 partner_card）
+                    raise ValueError(
+                        f"Composition {base_id!r} 的自定义 viewType={vtype!r} "
+                        f"缺少可解析的 ref（或 ref 指向不存在的自定义视图），"
+                        f"拒绝静默跳过该视图"
+                    )
+                type_key = legacy_key if vtype == "custom" else vtype
+                view_mode_parts.append(type_key)  # 自定义视图类型键（如 partner_board）
                 xml_ids.append(xid)
                 awv_records.append({
                     "xml_id": f"{module}.{base_id}_vw{i}",
@@ -184,10 +241,10 @@ def composition_action_records(
 
 
 def explicit_action_records(actions: List[Dict], module: str = "dsl_gen") -> List[Dict]:
-    """顶层 actions[] → 非视图类 opener（**怎么被打开**）：act_url / act_server。
+    """顶层 actions[] → 非视图类 opener（**怎么被打开**）：act_url / act_server / client。
 
-    Composition 已覆盖 act_window / client（视图类 opener）；这里补足 URL、服务端动作等
-    不绑定视图的打开方式。返回 ir.actions.act_url / ir.actions.server 记录。
+    Composition 已覆盖 act_window（视图类 opener）；这里补足 URL、服务端动作，以及可
+    显式声明的自定义客户端动作 `ir.actions.client`（tag 指向 OWL 注册的 action）。
     """
     records: List[Dict] = []
     for a in actions or []:
@@ -201,6 +258,19 @@ def explicit_action_records(actions: List[Dict], module: str = "dsl_gen") -> Lis
                 "target": a.get("target", "new"),
             }
             records.append({"xml_id": xid, "model": "ir.actions.act_url", "fields": fields})
+        elif atype == "client":
+            # 自定义 action（§2.1）：tag 必须已由 IR 校验器检查过引用完整性
+            tag = a.get("tag")
+            if not tag:
+                raise ValueError(f"action {aid!r} type=client 缺少 tag（不静默降级）")
+            fields = {"name": a.get("name", "Client Action"), "tag": tag}
+            if a.get("params") is not None:
+                fields["params"] = a["params"]
+            if a.get("context") is not None:
+                fields["context"] = a["context"]
+            if a.get("target"):
+                fields["target"] = a["target"]
+            records.append({"xml_id": xid, "model": "ir.actions.client", "fields": fields})
         elif atype == "server":
             fields = {
                 "name": a.get("name", "Server Action"),

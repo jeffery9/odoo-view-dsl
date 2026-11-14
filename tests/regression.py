@@ -69,7 +69,7 @@ def test_b2_unknown_kind_validator_errors():
 
 # ── G3：自定义 OWL 模板拒绝服务端视图原语（不依赖「先校验后生成」顺序）──
 def test_g3_custom_rejects_server_primitives():
-    for k in ("notebook", "page", "separator", "filter", "subview"):
+    for k in ("notebook", "page", "separator", "filter", "subview", "header", "footer"):
         try:
             element_to_node({"kind": k}, vtype="custom")
         except ValueError:
@@ -79,7 +79,9 @@ def test_g3_custom_rejects_server_primitives():
     # 标准视图仍允许这些原语
     n = element_to_node({"kind": "notebook", "pages": []}, vtype="form")
     assert n.tag == "notebook", "标准 form 视图应允许 <notebook>"
-    _ok("G3 自定义视图拒绝 notebook/page/separator/filter/subview；标准视图仍允许")
+    assert element_to_node({"kind": "header", "children": []}, vtype="form").tag == "header"
+    assert element_to_node({"kind": "footer", "children": []}, vtype="form").tag == "footer"
+    _ok("G3 自定义视图拒绝服务端原语（含 header/footer）；标准视图仍允许")
 
 
 # ── 健全性：合法 spec 不应触发未知 kind 误报 ──
@@ -87,6 +89,7 @@ def test_sanity_known_kinds_no_false_positive():
     binding = {
         "model": "x.model", "viewType": "form",
         "views": [{"id": "base", "mode": "primary", "elements": [
+            {"kind": "header", "children": [{"kind": "button", "string": "OK", "name": "x", "type": "object"}]},
             {"kind": "group", "children": [
                 {"kind": "field", "name": "name"},
                 {"kind": "button", "string": "OK", "name": "x", "type": "object"},
@@ -98,6 +101,7 @@ def test_sanity_known_kinds_no_false_positive():
             {"kind": "slot", "name": "s"},
             {"kind": "dynamicAttr", "mode": "f", "attr": "class", "value": "x"},
             {"kind": "call", "name": "frag"},
+            {"kind": "footer", "children": [{"kind": "button", "string": "Cancel", "name": "c", "type": "object"}]},
         ]}],
     }
     issues = dsl_validate.validate_binding(binding)

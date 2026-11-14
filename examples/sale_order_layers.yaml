@@ -1,0 +1,123 @@
+# 图层 / 切片（Layered inheritance）端到端样例
+# 对应规范 §4.1、§6.6 与 schema/$defs/View|Patch：
+#   - 层 0 = 基础层(primary)；后续切片(extension) inherit 前序层，priority 升序合并。
+#   - 切片只承载 patches，不带 elements（生成器只消费 patches）。
+#   - xpath 只以 @name 定位；@string/@for 可重复，由 IR 校验器判 PATCH_XPATH_UNSTABLE。
+#   - inherit 可以指向含 '.' 的外部基视图 xml_id：整个 binding 允许没有 primary（纯继承模块）。
+#   - header/footer 是 arch 顺序敏感的结构条：根 elements 的首 / 末各一个，含 button / statusbar 字段。
+module: dsl_layers_demo
+
+bindings:
+  # ① 同 binding 内的三层继承链：base → slice_hide_amount → slice_add_ref
+  - model: sale.order
+    viewType: form
+    prefix: sale_form_layers
+    views:
+      - id: base
+        mode: primary
+        name: Sale Order Form (base)
+        priority: 16
+        elements:
+          # 顶部条：arch 中 <header> 必须是 <form> 的第一个子节点
+          - kind: header
+            children:
+              - kind: button
+                name: action_confirm
+                string: 确认订单
+                type: object
+              - kind: field
+                name: state
+                widget: statusbar
+          # 通用布局块 + 独立标签：div 可嵌套任意元素，label.for 指向字段名（不是 xpath 定位键）
+          - kind: div
+            class: oe_title
+            groups: base.group_user
+            children:
+              - kind: label
+                for: name
+                string: 单号
+                class: o_form_label
+                colspan: 2
+              - kind: field
+                name: name
+                nolabel: true
+          - kind: group
+            string: 主要信息
+            children:
+              - kind: field
+                name: partner_id
+              - kind: field
+                name: date_order
+              - kind: field
+                name: amount_total
+          - kind: notebook
+            pages:
+              - string: 备注
+                children:
+                  - kind: field
+                    name: note
+          # 底部条：arch 中 <footer> 必须是 <form> 的最后一个子节点
+          - kind: footer
+            children:
+              - kind: button
+                name: action_save
+                string: 保存
+                type: object
+              - kind: button
+                name: action_cancel
+                string: 取消
+                type: object
+
+      - id: slice_hide_amount
+        mode: extension
+        inherit: base
+        name: "切片 1：隐藏金额"
+        priority: 17
+        patches:
+          # position=attributes 只收 attrs，不接受 elements
+          - xpath: "//field[@name='amount_total']"
+            position: attributes
+            attrs:
+              - name: invisible
+                value: "1"
+
+      - id: slice_add_ref
+        mode: extension
+        inherit: slice_hide_amount        # 指向前序切片，形成 inherit 链
+        name: "切片 2：追加客户单号"
+        priority: 18
+        patches:
+          # 其它 position 只收 elements，不接受 attrs
+          - xpath: "//field[@name='note']"
+            position: after
+            elements:
+              - kind: field
+                name: client_order_ref
+                string: 客户单号
+
+  # ② 纯继承模块：无 primary，切片继承外部模块的基视图（字面 xml_id）
+  - model: sale.order
+    viewType: search
+    prefix: sale_search_ext
+    views:
+      - id: ext_my_orders
+        mode: extension
+        inherit: sale.view_sale_order_search
+        name: "跨模块继承：我的订单筛选"
+        priority: 20
+        patches:
+          - xpath: "//filter[@name='my_orders']"
+            position: attributes
+            attrs:
+              - name: domain
+                value: "[['user_id', '=', uid]]"
+
+compositions:
+  - kind: act_window
+    id: action_layers
+    model: sale.order
+    name: Sales Orders (layered form)
+    views:
+      - viewType: list
+      - viewType: form
+    target: current

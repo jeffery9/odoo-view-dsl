@@ -25,6 +25,19 @@ STANDARD_TYPES = {
 # 标准类型在 arch 根标签上的映射（list → tree，Odoo 内部用 tree）
 ROOT_TAG = {"list": "tree", "tree": "tree"}
 
+# 切片 patch 的合法 position。与 schema/$defs/Patch 及
+# validator/dsl_validate.py 的 PATCH_POSITIONS 保持同步（校验器独立可运行，故各持副本）。
+PATCH_POSITIONS = {"inside", "after", "before", "replace", "attributes"}
+
+
+def is_external_inherit(ref) -> bool:
+    """inherit 是否为字面外部 xml_id（跨模块基视图，含 '.'）。
+
+    切片层栈的根既可以是本 binding 的 primary 基础层，也可以是外部模块的
+    ir.ui.view；后者直接作为 `<field name="inherit_id" ref="..."/>` 输出。
+    """
+    return isinstance(ref, str) and "." in ref
+
 
 def load_spec(path: str | Path) -> Dict[str, Any]:
     """加载 DSL 规格文件（.yaml / .yml 为主；.json 兼容）。
@@ -70,3 +83,50 @@ def collect_fragments(binding: Dict[str, Any]) -> Dict[str, List[Dict]]:
     for frag in binding.get("fragments", []) or []:
         out[frag["name"]] = frag.get("children") or frag.get("elements") or []
     return out
+
+
+def collect_registry(spec: Dict[str, Any]) -> Dict[str, Dict[str, Dict]]:
+    """顶层三类自定义注册表（§2.1）→ 按 id 索引。
+
+    `viewTypes[]` / `viewElements[]` 是「先声明后引用」的契约表；索引后供生成器、
+    QWeb IR 与反向转换消费。注册表为空时返回空字典，旧写法仍走兼容路径。
+    """
+    view_types: Dict[str, Dict] = {}
+    for t in spec.get("viewTypes", []) or []:
+        if isinstance(t, dict) and t.get("id"):
+            view_types[t["id"]] = t
+    view_elements: Dict[str, Dict] = {}
+    for e in spec.get("viewElements", []) or []:
+        if isinstance(e, dict) and e.get("id"):
+            view_elements[e["id"]] = e
+    return {"viewTypes": view_types, "viewElements": view_elements}
+
+
+def resolve_custom_type(binding: Dict[str, Any], view: Dict[str, Any],
+                        registry: Optional[Dict[str, Dict[str, Dict]]] = None
+                        ) -> tuple[bool, Optional[Dict]]:
+    """判定一条 View 是否走后端 B，并返回其自定义类型契约。
+
+    优先命中 `viewTypes[]` 注册项（注册表为权威）；未注册的旧写法
+    （`custom: true` / `viewType: custom`）合成一个隐式注册项，类型键取 view.id，
+    保持既有样例逐字兼容。返回 (is_custom, typedef | None)。
+    """
+    reg = (registry or {}).get("viewTypes", {})
+    vtype = view.get("viewType") or binding.get("viewType")
+    if vtype in reg:
+        typedef = dict(reg[vtype])
+        # view 级字段仅补齐注册表未声明的元数据（兼容旧样例的 view 级 className 等）
+        for k in ("className", "services", "props", "name", "context"):
+            if typedef.get(k) is None and view.get(k) is not None:
+                typedef[k] = view[k]
+        return True, typedef
+    legacy = (binding.get("custom") or view.get("custom")
+              or vtype == "custom" or binding.get("viewType") == "custom")
+    if legacy:
+        vid = view.get("id") or vtype or "custom"
+        typedef = {"id": vid}
+        for k in ("className", "services", "props", "name", "context"):
+            if view.get(k) is not None:
+                typedef[k] = view[k]
+        return True, typedef
+    return False, None

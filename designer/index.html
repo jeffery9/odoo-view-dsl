@@ -6,7 +6,10 @@
 <title>Odoo View DSL · Designer (canvas)</title>
 <link rel="stylesheet" href="odoo.css" />
 <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/ajv@8.12.0/dist/ajv.min.js"></script>
+<!-- 本仓库 schema 是 Draft 2020-12：必须用 Ajv 8 的 2020 浏览器 UMD 构建。
+     原先引用的 ajv.min.js 是 CommonJS 单文件构建，浏览器里会抛
+     "exports is not defined"，且只支持 draft-07，无法编译本仓库契约。 -->
+<script src="https://cdn.jsdelivr.net/npm/ajv@8.12.0/dist/2020.bundle.js"></script>
 <style>
   :root{
     --bg:#f1f5f9; --card:#ffffff; --border:#e2e8f0; --border2:#cbd5e1;
@@ -20,7 +23,10 @@
   header h1{font-size:15px;margin:0}
   header p{margin:0;color:var(--muted);font-size:12px}
   .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:#e2e8f0;color:#334155;margin-left:6px}
-  .wrap{display:flex;gap:0;height:calc(100vh - 49px)}
+  .wrap{display:flex;gap:0;height:calc(100vh - 82px)}
+  /* 页面级 contentinfo：每页仅一个；画布里的 Odoo <header>/<footer> 仿真节点用 <div> 承载 */
+  footer.pagefoot{padding:6px 18px;border-top:1px solid var(--border);background:var(--card);
+    color:var(--muted);font-size:12px;display:flex;gap:10px;align-items:center;min-height:33px}
   .col{overflow:auto;padding:14px}
   .col.left{flex:0 0 250px;border-right:1px solid var(--border);background:var(--card)}
   .col.center{flex:1 1 auto;background:var(--canvas);min-width:0}
@@ -37,7 +43,7 @@
     padding:6px 10px;border-radius:8px;font:inherit}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   button.danger{color:var(--danger);border-color:#fecaca}
-  button.sm{padding:3px 8px;font-size:12px}
+  button.sm{padding:3px 8px;font-size:12px;min-block-size:24px;min-inline-size:24px}
   .muted{color:var(--muted);font-size:12px}
   .muted.pad{padding:6px 0;font-style:italic}
   .typebadge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:#e0f2fe;color:#075985;margin:4px 0 2px}
@@ -56,6 +62,7 @@
   .chip:active{cursor:grabbing}
   .chip .t{color:var(--muted);font-size:10px;margin-left:4px}
   .addbtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .addbtns.structural{width:100%;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)}
   .tree{font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--muted);white-space:pre;margin-top:6px;max-height:200px;overflow:auto}
 
   /* 画布 */
@@ -112,18 +119,45 @@
   .layer{border:1px solid var(--border);border-radius:9px;padding:8px 9px;background:#f8fafc;cursor:pointer;transition:.1s}
   .layer:hover{border-color:var(--accent)}
   .layer.active{border-color:var(--accent);box-shadow:0 0 0 2px #bfdbfe66;background:#eff6ff}
-  .layer-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .layer-head{display:flex;align-items:center;justify-content:space-between;gap:6px;
+    width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
   .layer-name{font-size:13px;font-weight:600;color:var(--text)}
   .layer-badge{font-size:10px;padding:1px 7px;border-radius:999px}
   .layer-badge.base{background:#dcfce7;color:#14532d}
   .layer-badge.slice{background:#ede9fe;color:#5b21b6}
-  .layer-inherit{margin-top:6px;font-size:12px}
+  .layer-meta{font-size:10px;color:var(--muted);font-weight:400}
+  .layer-inherit{margin-top:6px;font-size:12px;width:100%;box-sizing:border-box}
   .layer-ctl{display:flex;gap:5px;margin-top:7px;justify-content:flex-end}
-  .layer-ctl button{padding:2px 8px;font-size:11px}
+  .layer-ctl button{padding:2px 8px;font-size:11px;min-block-size:24px;min-inline-size:24px}
+  .canvas-bar .hint.pick{color:#5b21b6;font-weight:600}
   .patch{border:1px solid var(--border);border-radius:9px;padding:9px;margin:9px 0;background:#fbfcfe}
   .patch .row{margin:4px 0}
+  .patch .insp-title{margin-bottom:6px}
   .patch-elems{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
   .patch-elems .chip.sm{padding:2px 8px;font-size:11px;cursor:pointer}
+  .patch-elems .chip.sm.active{border-color:var(--accent);background:#eff6ff;color:var(--accent)}
+  .patch-elems .chip .x{color:var(--muted);margin-left:2px;cursor:pointer}
+  .patch-elems .chip .x:hover{color:#b91c1c}
+
+  /* 自定义注册表卡片：可见 label + 紧跟控件；输入时不重建左栏，避免打字丢焦点 */
+  .reg-card h3{font-size:11px;margin:12px 0 6px;color:var(--accent);letter-spacing:.02em}
+  .reg-item{border:1px solid var(--border2);border-radius:9px;padding:8px;margin:8px 0;background:#fbfcfe}
+  .reg-item > button{margin-top:8px}
+  .reg-field label{margin:6px 0 2px}
+  .reg-card .muted{line-height:1.45}
+  .reg-item select{min-block-size:24px}
+
+  /* 原生 <dialog>：showModal() 自带 inert / 焦点 containment / Esc / 焦点返回。
+     不手写 role="dialog"、aria-modal、焦点陷阱或 Esc handler；
+     也不用 html/body 的 overflow:hidden 锁滚动（会移除根滚动条并导致布局位移）。 */
+  dialog{border:1px solid var(--border2);border-radius:12px;padding:16px 18px;
+    max-width:min(420px,calc(100vw - 32px));color:var(--text);background:var(--card);
+    box-shadow:0 12px 32px #0f172a33}
+  dialog h2{font-size:15px;margin:0 0 8px}
+  dialog p{margin:0 0 14px;color:var(--muted);font-size:13px}
+  dialog form[method="dialog"]{display:flex;justify-content:flex-end}
+  dialog:modal{overscroll-behavior:contain}
+  dialog::backdrop{background:#0f172a55;overflow:hidden;overscroll-behavior:contain}
 </style>
 </head>
 <body>
@@ -132,7 +166,14 @@
   <p>画布式：左=工具箱，中=画布（所见即所得），右=检查器+DSL。设计器只产出 DSL，转换交给 <code>oview.pipeline</code>。</p>
 </header>
 
-<div class="wrap">
+<!-- 原生模态对话框：替代 window.alert（showModal 提供语义、焦点管理与 Esc 关闭） -->
+<dialog id="noticeDialog" aria-labelledby="noticeTitle">
+  <h2 id="noticeTitle">提示</h2>
+  <p id="noticeBody"></p>
+  <form method="dialog"><button value="ok" autofocus class="sm primary">知道了</button></form>
+</dialog>
+
+<main class="wrap">
   <div class="col left" id="left"></div>
 
   <div class="col center">
@@ -141,7 +182,12 @@
   </div>
 
   <div class="col right" id="right"></div>
-</div>
+</main>
+
+<footer class="pagefoot">
+  <span>Designer 只产出 DSL；权威结果以 <code>python3 -m oview.pipeline</code> 为准。</span>
+  <span>画布中的 <code>header</code> / <code>footer</code> 是 Odoo arch 结构条，不是本页的页面区域。</span>
+</footer>
 
 <script src="app.js"></script>
 </body>

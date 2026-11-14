@@ -76,6 +76,16 @@ def check_example(path: Path) -> bool:
 
 
 # ── 反例：必须被 schema 拦截，证明校验非 no-op ──
+def _slice_case(slice_view: dict) -> dict:
+    """构造含 1 个 primary 基础层 + 1 个切片层的合法骨架，只让切片本身出问题。"""
+    return {"module": "x", "bindings": [{
+        "model": "sale.order", "viewType": "form",
+        "views": [
+            {"id": "base", "mode": "primary", "elements": []},
+            slice_view,
+        ]}]}
+
+
 COUNTER_CASES = {
     "缺 module/bindings": {},
     "field 缺 name": {
@@ -105,6 +115,89 @@ COUNTER_CASES = {
     },
     "顶层多余键": {
         "module": "x", "bindings": [], "bogus_key": 1},
+    # ── 切片层契约（§4.1/§6.6）──
+    "切片 xpath 为空": _slice_case({
+        "id": "s", "mode": "extension", "inherit": "base",
+        "patches": [{"xpath": "", "position": "after",
+                     "elements": [{"kind": "field", "name": "x"}]}]}),
+    "切片 position=attributes 缺 attrs": _slice_case({
+        "id": "s", "mode": "extension", "inherit": "base",
+        "patches": [{"xpath": "//field[@name='x']", "position": "attributes"}]}),
+    "切片 position=attributes 混用 elements": _slice_case({
+        "id": "s", "mode": "extension", "inherit": "base",
+        "patches": [{"xpath": "//field[@name='x']", "position": "attributes",
+                     "attrs": [{"name": "invisible", "value": "1"}],
+                     "elements": [{"kind": "field", "name": "y"}]}]}),
+    "切片 position=after 带 attrs": _slice_case({
+        "id": "s", "mode": "extension", "inherit": "base",
+        "patches": [{"xpath": "//field[@name='x']", "position": "after",
+                     "elements": [{"kind": "field", "name": "y"}],
+                     "attrs": [{"name": "invisible", "value": "1"}]}]}),
+    "primary 带 patches": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "mode": "primary", "elements": [],
+                       "patches": [{"xpath": "//field[@name='x']", "position": "after",
+                                    "elements": []}]}]}],
+    },
+    "extension 带 elements（会被生成器静默丢弃）": _slice_case({
+        "id": "s", "mode": "extension", "inherit": "base",
+        "elements": [{"kind": "field", "name": "x"}]}),
+    # ── 结构条契约（§6.5）：children 必填，否则 arch 里是空壳 <header>/<footer> ──
+    "header 缺 children": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "elements": [{"kind": "header"}]}]}],
+    },
+    "footer 缺 children": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "elements": [
+                {"kind": "group", "children": []}, {"kind": "footer"}]}]}],
+    },
+    # ── div / label：类型约束与 children 递归校验 ──
+    "label colspan 非整数": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "elements": [{"kind": "label", "colspan": "two"}]}]}],
+    },
+    "div.children 内未知 kind": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "elements": [
+                {"kind": "div", "children": [{"kind": "fild", "name": "x"}]}]}]}],
+    },
+    # ── 自定义注册表契约（§2.1）：先声明后引用，缺必填字段必须被拦截 ──
+    "customElement 缺 ref": {
+        "module": "x", "bindings": [{
+            "model": "sale.order", "viewType": "form",
+            "views": [{"id": "v", "elements": [{"kind": "customElement"}]}]}],
+    },
+    "viewTypes 注册项缺 id": {
+        "module": "x", "viewTypes": [{"name": "看板"}],
+        "bindings": [{"model": "sale.order", "viewType": "form",
+                      "views": [{"id": "v", "elements": []}]}],
+    },
+    "viewTypes 注册项 id 非法": {
+        "module": "x", "viewTypes": [{"id": "1_bad-type"}],
+        "bindings": [{"model": "sale.order", "viewType": "form",
+                      "views": [{"id": "v", "elements": []}]}],
+    },
+    "viewElements props 项缺 name": {
+        "module": "x", "viewElements": [{"id": "badge", "props": [{"required": True}]}],
+        "bindings": [{"model": "sale.order", "viewType": "form",
+                      "views": [{"id": "v", "elements": []}]}],
+    },
+    "client action 缺 tag": {
+        "module": "x", "actions": [{"id": "open_board", "type": "client"}],
+        "bindings": [{"model": "sale.order", "viewType": "form",
+                      "views": [{"id": "v", "elements": []}]}],
+    },
+    "url action 缺 url": {
+        "module": "x", "actions": [{"id": "docs", "type": "url"}],
+        "bindings": [{"model": "sale.order", "viewType": "form",
+                      "views": [{"id": "v", "elements": []}]}],
+    },
 }
 
 

@@ -81,8 +81,11 @@ def test_form_fragment():
     assert binding["viewType"] == "form"
     kinds = []
     _find_kinds(binding["views"][0]["elements"], kinds)
-    # header 穿透：button 上提到 form 顶层
+    # header 是一等结构元素：button 保留在 header.children 内，不再被穿透上提
+    assert "header" in kinds
     assert "button" in kinds
+    assert binding["views"][0]["elements"][0]["kind"] == "header"
+    assert binding["views"][0]["elements"][0]["children"][0]["kind"] == "button"
     assert "group" in kinds
     assert "notebook" in kinds
     # 未知标签 newline → raw
