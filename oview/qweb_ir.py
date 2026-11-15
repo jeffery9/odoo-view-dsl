@@ -24,19 +24,37 @@ _FIELD_KNOWN = {
 # 不从本模块 import，故两处各持一份副本（变更时需同步）。
 KNOWN_KINDS = {
     "field", "group", "notebook", "page", "button", "separator", "label",
-    "filter", "subview", "component", "if", "foreach", "set", "slot",
-    "dynamicAttr", "call", "raw",
+    "div", "header", "footer", "filter", "subview", "component", "if", "foreach",
+    "set", "slot", "dynamicAttr", "call", "raw", "customElement",
 }
 
 # 这些元素是服务端（标准）视图原语，自定义 OWL 模板不应出现（G3 生成器自保）。
 # 与标准视图不同：自定义视图是纯 QWeb/HTML 模板，没有 <notebook>/<filter> 等 Odoo 结构。
-_SERVER_ONLY_KINDS = {"notebook", "page", "separator", "filter", "subview"}
-
+_SERVER_ONLY_KINDS = {"notebook", "page", "separator", "filter", "subview",
+                      "header", "footer"}
 
 def _set_if(elem: etree._Element, key: str, val: Any) -> None:
     if val is None:
         return
+    # Odoo arch 的布尔属性用 "1" / "0"，不写 Python 的 True / False
+    if isinstance(val, bool):
+        val = "1" if val else "0"
     elem.set(key, str(val))
+
+
+# 布局/结构元素（div / label / header / footer）的 arch 属性逐键透传。
+# 与 to_dsl 的 _build_div/_build_label/_build_structure 对称：反向转换把 arch
+# 属性全部铺平成 DSL 一等键，正向生成器必须把它们逐个写回，绝不静默丢弃。
+_SKIP_ATTRS = {"kind", "children", "pages", "extra"}
+
+
+def _passthrough_attrs(node: etree._Element, elem: Dict) -> None:
+    for k, v in elem.items():
+        if k in _SKIP_ATTRS or isinstance(v, (dict, list)):
+            continue
+        _set_if(node, k, v)
+    for k, v in (elem.get("extra") or {}).items():
+        _set_if(node, k, v)
 
 
 def _collect_children(elem: Dict) -> List[Dict]:
@@ -59,10 +77,16 @@ def element_to_node(
     elem: Dict,
     vtype: Optional[str] = None,
     fragments: Optional[Dict[str, List[Dict]]] = None,
+    view_elements: Optional[Dict[str, Dict]] = None,
 ) -> etree._Element:
-    """把单个 DSL Element 降低为 lxml 节点。"""
+    """把单个 DSL Element 降低为 lxml 节点。
+
+    view_elements: `viewElements[]` 注册表按 id 索引；`kind=customElement` 时按
+    注册项的 tag / props 契约展开，缺失注册项直接抛错（不静默降级）。
+    """
     kind = elem.get("kind")
     fragments = fragments or {}
+    view_elements = view_elements or {}
 
     # 不静默降级铁律（规范 §6.4）：未知/缺失 kind 直接抛错，绝不产出 <span> 死节点。
     if kind is None:
@@ -88,14 +112,24 @@ def element_to_node(
         e = etree.Element("field")
         e.set("name", elem["name"])
         for k in ("widget", "string", "invisible", "readonly", "required",
-                  "domain", "context", "groups", "force_save", "placeholder", "password"):
+                  "domain", "context", "groups", "force_save", "placeholder",
+                  "password", "nolabel", "colspan", "help"):
             _set_if(e, k, elem.get(k))
         if elem.get("options") is not None:
             e.set("options", json.dumps(elem["options"], ensure_ascii=False))
         for k, v in (elem.get("extra") or {}).items():
             e.set(k, str(v))
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
+        return e
+
+    if kind in ("header", "footer"):
+        # 结构条：arch 顺序由 DSL 根 elements 的数组顺序决定（header 首 / footer 末），
+        # 生成器不重排，避免出现 Odoo RNG 拒绝的 <form> 子节点次序。
+        e = etree.Element(kind)
+        _passthrough_attrs(e, elem)
+        for c in elem.get("children", []):
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "group":
@@ -104,7 +138,7 @@ def element_to_node(
         _set_if(e, "col", elem.get("col"))
         _set_if(e, "groups", elem.get("groups"))
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "notebook":
@@ -114,7 +148,7 @@ def element_to_node(
             _set_if(pg, "string", p.get("string"))
             _set_if(pg, "groups", p.get("groups"))
             for c in p.get("children", []):
-                pg.append(element_to_node(c, vtype, fragments))
+                pg.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "page":
@@ -122,7 +156,7 @@ def element_to_node(
         _set_if(e, "string", elem.get("string"))
         _set_if(e, "groups", elem.get("groups"))
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "button":
@@ -149,8 +183,15 @@ def element_to_node(
 
     if kind == "label":
         e = etree.Element("label")
-        _set_if(e, "for", elem.get("for"))
-        _set_if(e, "string", elem.get("string"))
+        _passthrough_attrs(e, elem)   # for / string / class / colspan / nolabel / …
+        return e
+
+    if kind == "div":
+        # 通用布局容器：属性逐键透传，children 递归生成（不再穿透吞掉结构）
+        e = etree.Element("div")
+        _passthrough_attrs(e, elem)
+        for c in elem.get("children", []):
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "filter":
@@ -180,15 +221,40 @@ def element_to_node(
             e.set(f"t-props-{k}", str(v))
         return e
 
+    if kind == "customElement":
+        # 自定义元素（§2.1）：注册表先声明后引用，按注册项 tag / props 契约展开。
+        # 未注册直接抛错——绝不静默降级成 <span> 死节点。
+        ref = elem.get("ref")
+        reg = view_elements.get(ref)
+        if not reg:
+            raise ValueError(
+                f"customElement ref={ref!r} 未命中 viewElements[] 注册项，"
+                f"无法生成标签（不静默降级）"
+            )
+        e = etree.Element(reg.get("tag") or ref)
+        prop_defs = {p["name"]: p for p in (reg.get("props") or [])
+                     if isinstance(p, dict) and p.get("name")}
+        given = dict(elem.get("props") or {})
+        for name, pdef in prop_defs.items():
+            if name not in given and "default" in pdef:
+                given[name] = pdef["default"]
+        for k, v in given.items():
+            if isinstance(v, (dict, list)):
+                v = json.dumps(v, ensure_ascii=False)
+            _set_if(e, k, v)
+        for c in elem.get("children", []):
+            e.append(element_to_node(c, vtype, fragments, view_elements))
+        return e
+
     if kind == "if":
         e = etree.Element("t")
         e.set("t-if", elem["cond"])
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         for el in (elem.get("else") or []):
             en = etree.SubElement(e, "t")
             en.set("t-else", "")
-            en.append(element_to_node(el, vtype, fragments))
+            en.append(element_to_node(el, vtype, fragments, view_elements))
         return e
 
     if kind == "foreach":
@@ -196,7 +262,7 @@ def element_to_node(
         e.set("t-foreach", elem["expr"])
         e.set("t-as", elem["as"])
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "set":
@@ -205,14 +271,14 @@ def element_to_node(
         if elem.get("value") is not None:
             e.set("t-value", str(elem["value"]))
         for c in elem.get("children", []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "slot":
         e = etree.Element("t")
         e.set("t-slot", elem["name"])
         for c in (elem.get("fallback") or []):
-            e.append(element_to_node(c, vtype, fragments))
+            e.append(element_to_node(c, vtype, fragments, view_elements))
         return e
 
     if kind == "dynamicAttr":
@@ -237,7 +303,7 @@ def element_to_node(
         for k, v in (elem.get("with") or {}).items():
             e.set(f"t-call-{k}", str(v))
         for sub in fragments.get(elem["name"], []):
-            e.append(element_to_node(sub, vtype, fragments))
+            e.append(element_to_node(sub, vtype, fragments, view_elements))
         return e
 
     if kind == "raw":
@@ -254,12 +320,13 @@ def element_to_node(
 
 
 def elements_to_root(elements: List[Dict], vtype: str,
-                     fragments: Optional[Dict[str, List[Dict]]] = None) -> etree._Element:
+                     fragments: Optional[Dict[str, List[Dict]]] = None,
+                     view_elements: Optional[Dict[str, Dict]] = None) -> etree._Element:
     """多个顶层元素包进视图根标签。"""
     from .model import view_root_tag
     root = etree.Element(view_root_tag(vtype))
     for el in elements:
-        root.append(element_to_node(el, vtype, fragments))
+        root.append(element_to_node(el, vtype, fragments, view_elements))
     return root
 
 

@@ -16,7 +16,7 @@ import dsl_validate  # type: ignore
 import rng_validate  # type: ignore
 
 from . import backend_a, backend_b
-from .model import load_spec, normalize_binding
+from .model import collect_registry, load_spec, normalize_binding, resolve_custom_type
 
 # RNG 目录单一事实来源：来自 rng_validate（已支持 ODOO_RNG_DIR 环境变量覆盖，
 # 不再在此硬编码具体 checkout 路径，提升可移植性 —— G4）。
@@ -40,6 +40,10 @@ def run(spec_path: str, out_dir: str, module: str = "dsl_gen",
     bindings = spec.get("bindings", [])
     compositions = spec.get("compositions", [])
     module = spec.get("module") or module
+    # 三类自定义注册表（§2.1）：按 id 索引后供后端 A/B、QWeb IR 消费
+    registry = collect_registry(spec)
+    view_elements = registry["viewElements"]
+    custom_types = set(registry["viewTypes"])
     log: List[str] = []
     total_errors = 0
 
@@ -55,40 +59,57 @@ def run(spec_path: str, out_dir: str, module: str = "dsl_gen",
     if menu_issues:
         total_errors += _emit_issues(log, "顶层 menus/actions 引用", menu_issues)
 
+    # 1.6) 三类自定义注册表引用完整性（viewTypes / viewElements / client action）
+    registry_issues = dsl_validate.check_registry_refs(spec, rng_dir=rng_dir)
+    if registry_issues:
+        total_errors += _emit_issues(log, "自定义注册表引用", registry_issues)
+
     # 2) 生成后端 A（标准视图记录）；自定义 binding 交给后端 B，此处跳过
     log.append("◆ 后端 A 生成 (标准视图 → ir.ui.view / act_window)")
     view_records: List[Dict] = []
     id_map: Dict[Tuple[int, str], str] = {}
     for bi, b in enumerate(bindings):
         b = normalize_binding(b)
-        if b.get("custom") or any(
-            (v.get("viewType") == "custom" or v.get("custom")) for v in b.get("views", [])
-        ):
+        if any(resolve_custom_type(b, v, registry)[0] for v in b.get("views", [])):
             continue  # 自定义视图不产标准 ir.ui.view，由后端 B 处理
-        recs = backend_a.binding_view_records(b, module=module)
+        try:
+            recs = backend_a.binding_view_records(b, module=module,
+                                                   view_elements=view_elements)
+        except (ValueError, KeyError) as ex:
+            # 生成期自保失败（悬空 inherit / 非法层组合）转成报告项，而非 traceback；
+            # 其余 binding 仍继续生成，保证一次运行给出完整诊断。
+            total_errors += 1
+            log.append(f"  [ERROR] binding {b.get('model')}/{b.get('viewType')} 生成失败: {ex}")
+            continue
         for r, v in zip(recs, b.get("views", [])):
             view_records.append(r)
             id_map[(bi, v["id"])] = r["xml_id"]
 
     # 3) 生成后端 B（自定义视图 → OWL 三件套 + ir.actions.client + ir.ui.view(自定义类型)）
     log.append("◆ 后端 B 生成 (自定义视图 → OWL 组件)")
+    if custom_types or view_elements:
+        log.append(f"  [OK] 自定义注册表: {len(custom_types)} 个 view type + "
+                   f"{len(view_elements)} 个 view element")
     custom_files: List[Tuple[str, str]] = []
     custom_actions: List[Dict] = []
     custom_view_records: List[Dict] = []
     custom_view_xmlid: Dict[str, str] = {}  # vid -> ir.ui.view xml_id（供 Composition 引用，G1）
     for bi, b in enumerate(bindings):
         b = normalize_binding(b)
-        if b.get("custom") or any((v.get("viewType") == "custom" or v.get("custom")) for v in b.get("views", [])):
-            files, actions, view_recs = backend_b.binding_custom_records(b, module=module)
-            custom_files.extend(files)
-            custom_actions.extend(actions)
-            custom_view_records.extend(view_recs)
-            for v in b.get("views", []):
-                if (v.get("viewType") == "custom" or v.get("custom")):
-                    vid = v["id"]
-                    xid = f"{module}.view_{vid}"
-                    id_map[(bi, vid)] = xid
-                    custom_view_xmlid[vid] = xid
+        custom_views = [v for v in b.get("views", [])
+                        if resolve_custom_type(b, v, registry)[0]]
+        if not custom_views:
+            continue
+        files, actions, view_recs = backend_b.binding_custom_records(
+            b, module=module, registry=registry, view_elements=view_elements)
+        custom_files.extend(files)
+        custom_actions.extend(actions)
+        custom_view_records.extend(view_recs)
+        for v in custom_views:
+            vid = v["id"]
+            xid = f"{module}.view_{vid}"
+            id_map[(bi, vid)] = xid
+            custom_view_xmlid[vid] = xid
     if custom_files:
         log.append(f"  [OK] {len(custom_files)} 个 OWL 文件 + {len(custom_actions)} 个客户端 action "
                     f"+ {len(custom_view_records)} 个自定义 ir.ui.view")
@@ -98,13 +119,19 @@ def run(spec_path: str, out_dir: str, module: str = "dsl_gen",
     action_records: List[Dict] = []
     awv_records: List[Dict] = []
     for c in compositions:
-        acts, awvs = backend_a.composition_action_records(
-            c, module=module, id_map=id_map, custom_view_xmlid=custom_view_xmlid)
+        try:
+            acts, awvs = backend_a.composition_action_records(
+                c, module=module, id_map=id_map,
+                custom_view_xmlid=custom_view_xmlid, custom_types=custom_types)
+        except ValueError as ex:
+            total_errors += 1
+            log.append(f"  [ERROR] Composition {c.get('id')!r} 生成失败: {ex}")
+            continue
         action_records.extend(acts)
         awv_records.extend(awvs)
 
     # 4.5) 顶层 actions（url/server）+ menus（导航挂载）——「怎么被打开 / 挂到哪」
-    log.append("◆ 顶层 actions / menus 生成 (act_url/act_server + ir.ui.menu)")
+    log.append("◆ 顶层 actions / menus 生成 (act_url/act_server/client + ir.ui.menu)")
     comp_ids = {c.get("id") for c in compositions if c.get("id")}
     action_ids = {a.get("id") for a in (spec.get("actions") or []) if a.get("id")}
     menu_ids = {m.get("id") for m in (spec.get("menus") or []) if m.get("id")}
@@ -119,7 +146,13 @@ def run(spec_path: str, out_dir: str, module: str = "dsl_gen",
         # action：composition id 或 explicit action id
         return f"{module}.{ref}" if (ref in comp_ids or ref in action_ids) else None
 
-    explicit_action_recs = backend_a.explicit_action_records(spec.get("actions", []), module=module)
+    try:
+        explicit_action_recs = backend_a.explicit_action_records(
+            spec.get("actions", []), module=module)
+    except ValueError as ex:
+        total_errors += 1
+        log.append(f"  [ERROR] 顶层 actions 生成失败: {ex}")
+        explicit_action_recs = []
     menu_recs = backend_a.menu_records(spec.get("menus", []), module=module, resolver=_resolver)
     if explicit_action_recs or menu_recs:
         log.append(f"  [OK] {len(explicit_action_recs)} 个 explicit action + {len(menu_recs)} 个菜单")

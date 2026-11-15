@@ -24,7 +24,7 @@
 
 7. **一句话使命（双面定位）：** DSL 用来自**快速使用原生 view type 与原生 view element**，也用来**精确定义自定义 view type 与自定义 view element**。
    - **快速使用原生（加速面）**：`form/list/tree/search/graph/pivot/calendar/activity/dashboard` 等原生类型及其元素，用 17 种一等 `kind` 声明式书写，`inherit`/`Composition` 一键组合；由后端 A 生成 `ir.ui.view` + `act_window`，省去手写 arch 与 xpath。
-   - **精确定义自定义（表达面）**：`binding.custom: true` 经后端 B **完整生成** OWL 三件套 + `ir.ui.view(type=<vid>)` + `view_registry` 注册 + `ir.actions.client`，并可经 `viewType: custom + ref` 进入 `act_window.view_mode`（G1/G2）。
+   - **精确定义自定义（表达面）**：`viewTypes[]` 声明具名类型键，`binding.viewType` 引用后经后端 B **完整生成** OWL 三件套 + `ir.ui.view(type=<类型键>)` + `view_registry` 注册 + `ir.actions.client`，并可经 Composition 的 `viewType: <类型键> + ref` 进入 `act_window.view_mode`（G1/G2）；旧 `custom: true` 写法仍逐字兼容（详见条 9 / §2.1）。
    - **边界（务必分清）**：DSL **精确"定义并接入"自定义元素**（`kind: component` 引用 + View 级 `className`/`services`/`props` 塑造契约与挂载点）；但一个**全新 OWL 元素的行为实现（JS 逻辑）本身就是 OWL 代码，正确下沉到 OWL，不由 DSL 替写**。即：自定义元素"定义/接入"归 DSL，"实现"归 OWL。这与「DSL 是 QWeb 的加速层而非替代」一脉相承。
 
 8. **「怎么被打开、挂到哪」是一等语义组件（actions + menus）**：原生 DSL 此前只覆盖"视图定义"，打开方式（action）由 Composition 隐式生成、挂载位置（菜单）完全缺席。现补为两个顶层语义组件：
@@ -32,6 +32,13 @@
    - **`actions[]`**（新增）→ 非视图类 opener：`type: url`（`ir.actions.act_url`）/ `type: server`（`ir.actions.server`），补足 URL、服务端动作等不绑定视图的打开方式。
    - **`menus[]`**（新增）→ `ir.ui.menu`（"挂到哪"）：把 action 挂载到导航树；`action` 指向 composition id / explicit action id / 字面 xml_id；`parent` 指向 menu id / 字面 xml_id；**容器菜单（无 `action`）合法**，仅作分组父节点。
    - **引用完整性（不静默降级）**：`dsl_validate.check_menu_refs` 在生成前校验 `menu.action` / `menu.parent` 不悬空（指向未知 id 且非字面 xml_id 即报 `MENU_ACTION_DANGLING` / `MENU_PARENT_DANGLING` ERROR），避免生成指向不存在 action 的菜单。结构化校验（必填/类型）归 JSON Schema；引用完整性归 IR 校验器，两层各司其职。
+
+9. **「自定义」三类一等注册表（§2.1）**：此前自定义能力是硬编码的（只有 `viewType: custom` 一种、`kind: component` 一种引用、`actions[]` 只有 url/server），无法声明任意具名类型/元素/动作。现补为三个顶层注册表，遵循**先声明后引用**：
+   - **`viewTypes[]`**：自定义 view type（类型键 → OWL 组件契约 `className`/`template`/`tag`/`services`/`props`）。`binding.viewType` 具名引用；后端 B 生成 OWL 三件套 + `ir.ui.view(type=<id>)` + `view_registry` + `ir.actions.client`，类型键可直接进入 `act_window.view_mode`。
+   - **`viewElements[]`**：自定义 view element（引用名 → 标签 `tag` + `props` 契约）。元素以 `{ kind: "customElement", ref: <id>, props: {...} }` 引用，生成器按注册表展开为标签节点；引用完整性、required prop 契约由 `dsl_validate.check_registry_refs` 卡控。
+   - **`actions[]` 的 `type: client`**：显式声明自定义客户端动作（`tag`/`params`/`context`）→ `ir.actions.client`，不再只能由后端 B 隐式生成。
+   - **边界不变**：DSL 只负责「定义 + 接入」，OWL 组件的 JS 业务逻辑仍归 OWL（§0.7 条 7）。注册表是契约声明，不是 JS 代码生成器；`raw`/`component` 等既有逃逸与引用机制保留。
+   - **兼容**：未注册的 `viewType: custom` + `custom: true` 仍按旧语义合成隐式注册项（类型键取 view.id），已有样例无需改写。
 
 > 关键纠正演进：① 不把"标准/自定义"当平行 DSL；② `model` 是 View 层必填绑定；③ 引入 Element 与 Composition；④ 一个 (model, viewType) 由**一组 views** 定义，靠 **`inherit` 继承扩展**，合并结果 = 该 view type 的最终结果；⑤ **缝修复**：高频高级 QWeb 指令提升为一等 `Element`，`raw` 降级进 QWeb IR（不绕过管线）+ QA `seam` 告警，恢复 View 单一来源；⑥ **主语言定为 YAML**（声明式、可读、可注释）。
 
@@ -82,21 +89,26 @@ type Element =
       icon?: string; invisible?: Expr; groups?: string; confirm?: string; context?: Expr;
       "aria-label"?: string; default_focus?: boolean }
   | { kind: "separator"; string?: string; colspan?: number; orientation?: string; name?: string; groups?: string }
-  | { kind: "label";    for?: string; string?: string; colspan?: number; nolabel?: boolean; invisible?: Expr }
+  | { kind: "label";    for?: string; string?: string; colspan?: number; nolabel?: boolean; invisible?: Expr;
+      class?: string; groups?: string; help?: string }                    // 独立标签（已实现，属性逐键透传）
+  | { kind: "div";      children?: Element[]; class?: string; string?: string; name?: string;
+      groups?: string; invisible?: Expr; colspan?: number }               // 通用布局容器（已实现，可嵌套）
   | { kind: "image";    name: string }                                   // common.rng <image name>
   | { kind: "html";     arch?: QWebArch }                                // common.rng <html>（含 QWeb 指令）
   | { kind: "newline";  }                                                // common.rng <newline/>
   // —— 类型专属元素（校验器按 viewType 限定作用域，见 §6.5）——
   | { kind: "notebook"; pages: Page[] }                                  // form 专属（form_view.rng）
   | { kind: "page";     string: string; children: Element[] }            // form 专属
-  | { kind: "header";   children: Element[] }                            // form/list 顶部条（tree_view.rng）
+  | { kind: "header";   children: Element[]; class?: string; groups?: string; invisible?: Expr }  // form/list 顶部条（已实现）
+  | { kind: "footer";   children: Element[]; class?: string; groups?: string; invisible?: Expr }  // form 底部条/对话框按钮区（已实现）
   | { kind: "filter";   name: string; string?: string; domain?: Expr; context?: Expr; date?: string; groups?: string } // search 专属
   | { kind: "searchpanel"; view_types?: string; children: Element[] }   // search 专属（search_view.rng）
   | { kind: "groupby";  name: string; expand?: boolean; children: Element[] } // list 专属（tree_view.rng，限 field/button）
   | { kind: "control";  creates: { string: string; context: Expr }[] }   // list 专属（tree_view.rng，x2many 内联新增）
   // —— 组合 / 自定义 ——
   | { kind: "subview";  viewRef: ViewRef }                  // 嵌入另一 View（组合）
-  | { kind: "component"; component: string; props?: Record<string,Expr> }  // 自定义：嵌组件
+  | { kind: "component"; component: string; props?: Record<string,Expr> }  // 自定义：嵌组件（直接引用现成组件）
+  | { kind: "customElement"; ref: string; props?: Record<string,Expr>; children?: Element[] } // 自定义：引用 viewElements[] 注册项（§2.1）
   // —— 高级 QWeb 指令：提升为一等元素，避免回落 raw（缝的修复，见 §3.1）——
   | { kind: "if";        cond: Expr; children: Element[]; else?: Element[] }    // t-if / t-elif / t-else
   | { kind: "foreach";   expr: Expr; as: string; children: Element[] }          // t-foreach / t-as
@@ -115,24 +127,65 @@ type View = {
   model: string;                    // 必填：绑定 Model
   viewType: ViewTypeRef;            // 标准 type 名 或 自定义 type 名
   name?: string;
-  inherit?: string;                 // 父视图 id（→ inherit_id）；base 视图省略
-  mode?: "primary" | "extension";  // base=primary（默认），扩展=extension
-  elements: Element[];              // 主视图=全量元素；扩展视图通常经 patches 增量
-  patches?: Patch[];               // extension 视图对父 arch 的 xpath/position 修改
-  fields: FieldRef[];               // 引用到的模型字段（供校验）
+  inherit?: string;                 // 父视图：本 binding 内的层 id，或含 '.' 的字面外部 xml_id（跨模块基视图）→ inherit_id
+  mode?: "primary" | "extension";  // 基础层=primary（默认），切片层=extension
+  priority?: number;                // 层序（→ ir.ui.view.priority），同 binding 内按升序合并
+  elements?: Element[];             // 仅 primary：全量元素
+  patches?: Patch[];                // 仅 extension：对父 arch 的 xpath/position 增量修改
+  fields?: FieldRef[];              // 引用到的模型字段（供校验）
 };
+// 互斥不变量：primary 不得带 inherit/patches；extension 必须带 inherit、不得带 elements。
+// 生成器只消费 extension.patches，若允许 elements 会造成静默数据丢失，故契约层禁止。
 
 type Patch = {
-  xpath: string;                   // 定位父 arch 节点
+  xpath: string;                   // 非空，定位父 arch 节点
   position: "inside"|"after"|"before"|"replace"|"attributes";
-  elements?: Element[];            // 注入的元素
-  attrs?: Record<string,string>;   // position=attributes 时设置属性
+  elements?: Element[];            // 非 attributes 时注入的元素（replace 允许空 = 删除目标节点）
+  attrs?: AttrPatch[];             // 仅 position=attributes 时设置属性
 };
+type AttrPatch = { name: string; value?: string };
+// position=attributes ↔ attrs（必填、与 elements 互斥）；其余 position ↔ elements（与 attrs 互斥）。
 
 type ViewRef = { id: string } | { model: string; type: string; name?: string };
-type ViewTypeRef = string;         // "form" | "list" | "dashboard" | ...
+type ViewTypeRef = string;         // "form" | "list" | "dashboard" | 自定义注册表 id
 
-// 自定义视图类型定义（标准类型由 Odoo 内建，无需定义）
+// ══ 2.1) 自定义注册表：三类一等声明（先声明后引用）════
+// 结构化必填/类型归 schema/$defs；跨对象引用完整性归 dsl_validate.check_registry_refs。
+type CustomViewType = {
+  id: string;                       // 类型键 → ir.ui.view.type / act_window.view_mode / view_registry
+  name?: string;
+  className?: string;                // OWL 组件类名（缺省由 id 推导 PascalCase）
+  template?: string;                 // QWeb 模板名（缺省 module.id）
+  tag?: string;                      // ir.actions.client tag（缺省 module.id）
+  services?: string[];               // 显式声明，禁隐式注入（§6.3）
+  props?: string[];                  // 组件 prop 契约（进 setup 注释）
+  description?: string;
+};
+type ViewElementProp = { name: string; required?: boolean; default?: unknown };
+type CustomViewElement = {
+  id: string;                        // DSL 引用名（不得与内置 kind 同名）
+  tag?: string;                      // 实际写入 arch / QWeb 的标签名（缺省 = id）
+  props?: ViewElementProp[];         // 引用时必须满足的 prop 契约
+  description?: string;
+};
+type CustomAction =
+  | { id: string; type: "url";    url: string;  name?: string; target?: string }
+  | { id: string; type: "server"; model: string; name?: string; code?: string; state?: string }
+  | { id: string; type: "client"; tag: string;  name?: string;
+      params?: Record<string,unknown>; context?: Expr; target?: string };
+
+type Spec = {
+  module: string;
+  bindings: ViewTypeBinding[];
+  viewTypes?: CustomViewType[];      // §2.1 自定义 view type 注册表
+  viewElements?: CustomViewElement[]; // §2.1 自定义 view element 注册表
+  compositions?: Composition[];
+  actions?: CustomAction[];            // §2.1 含 client 自定义动作
+  menus?: Menu[];
+};
+
+// 概念层组件契约（描述性；落地实现以 §2.1 注册表为准）
+
 type CustomType = {
   type: string;
   entry: { type: "client-action"; tag: string }
@@ -248,7 +301,28 @@ graph LR
   C["Composition act_window<br>views: viewType[]"] --> A["ir.actions.act_window<br>(view_mode)"]
 ```
 
-**校验（继承专用）**：inherit 链必须收敛到一条 primary base；无环；extension 的 xpath 目标须存在于 base（或上游）arch；`model` 与 `viewType` 合法；`fields` 属 `model`。
+**校验（继承专用）**：inherit 链必须收敛到一条 primary base（或一条含 `.` 的外部基视图）；无环；`model` 与 `viewType` 合法；`fields` 属 `model`。其中「xpath 目标是否存在 / 字段是否属 model」需 Odoo 运行时，离线校验器只标注 `NEEDS_ODOO_ENV`。
+
+### 4.1 继承层栈 / 切片（Layered inheritance）
+
+`ViewTypeBinding.views[]` 不是无序集合，而是**有序继承层栈**——本仓库把 Odoo 视图继承显式化、可编排的核心概念：
+
+| 层 | mode | 内容 | 生成器产物 |
+| :-- | :--- | :--- | :--- |
+| 层 0（基础层 / base） | `primary` | 全量 `elements` | `ir.ui.view`（无 `inherit_id`，arch = 根视图） |
+| 层 k>0（切片层 / slice） | `extension` | `inherit` + `patches` | `ir.ui.view(mode=extension, inherit_id=…, arch=<data><xpath…/></data>)` |
+
+三条不变量：
+
+1. **层 0 恒为基础层**；切片层的 `inherit` 指向**前序层**（层栈中索引更小的层），因此链天然无环且必然收敛。切片按 `priority` 升序应用，设计器以 `16 + 层索引` 自动维护——UI 调序即调整合并顺序。
+2. **切片的根可以是外部基视图**：`inherit` 允许写成含 `.` 的字面 xml_id（如 `sale.view_order_form`）。此时整个 binding 可以**没有 primary**（纯继承模块），生成器直接输出 `<field name="inherit_id" ref="sale.view_order_form"/>`；校验器跳过外部引用的存在性检查并标注 `EXTERNAL_BASE_VIEW`。这覆盖真实 Odoo 中大量「只做继承扩展」的模块。
+3. **切片只承载增量**：`patches` 是切片唯一的内容来源，`elements` 被契约禁止（否则生成器会静默丢弃）。`position=attributes` 走 `attrs`，其余 position 走 `elements`，二者互斥；`replace` 允许空 `elements`，语义为删除目标节点。
+
+**有效视图（effective view）**：`base arch ⊕ 所有后代切片`（沿 inherit 链、按 priority 升序应用）。**生成器不预合并**：产出的是层记录集合，合并权归 Odoo 运行时；设计器只提供「沿链预览 / 全量叠加预览」，不产出合并后的成品。
+
+**定位键约束**：切片 `patch.xpath` 必须以 `@name` 为定位键。`@string` 是可翻译且可重复的显示标签（两个 `<group string="主要信息">` 完全合法），`@for` 亦可重复，二者都可能命中多个节点；无 `name` 的结构容器不自动生成 xpath，应以其内部字段为锚点（如 `//field[@name="partner_id"]/..`）由作者手写。详见 §6.6。
+
+**校验职责划分**：结构（mode 互斥、patch 结构、position 互斥、xpath 非空）→ `schema/`；跨层引用与切片内元素（id 唯一、inherit 目标存在/无环、未知 kind/作用域/raw/extra）→ `validator/dsl_validate.py`；arch 语法 → `rng_validate.py`；xpath 目标与字段归属 → Odoo 运行时。
 
 ---
 
@@ -292,13 +366,36 @@ graph LR
 
 ### 6.5 元素作用域与 RNG 终审（grounding 落地）
 
-- **类型作用域**：校验器按 `viewType` 限定元素种类，禁止跨类型误用：**`notebook`/`page` 仅 form**；**`filter`/`searchpanel` 仅 search**；**`groupby`/`control` 仅 list/tree**；`header` 限 form/list。越界判 **ERROR**。
+- **类型作用域**：校验器按 `viewType` 限定元素种类，禁止跨类型误用：**`notebook`/`page` 仅 form**；**`filter`/`searchpanel` 仅 search**；**`groupby`/`control` 仅 list/tree**；`header` 限 form/list；`footer` 仅 form。越界判 **ERROR**。
+- **`header`/`footer` 结构位置**（arch 顺序约束）：二者只能出现在**视图根 `elements`**，不得嵌套进 group/notebook/patch；同一视图各最多一个；`header` 必须是根 `elements` 的第 0 项，`footer` 必须是最后一项。违反由 IR 校验器报 `ELEMENT_STRUCTURE`（ERROR），避免产出 Odoo RNG 会拒绝的 arch。
+  - 切片 `patches[].elements` 不受位置约束：它们由 xpath 注入到父 arch 的指定位置，位置语义归 xpath/position。
+  - 反向转换：`sheet` 仍是纯布局容器（穿透展开）；`header`/`footer`/`div`/`label` **保留为结构化元素**（不再丢失顶部/底部条、布局块与标签的属性与子节点）。`div` 的 `children` 恒输出（含空数组），保证再正向生成时结构无损。
 - **RNG 终审**：标准视图生成的最终 `arch` **必须**通过对应 `*.rng`（form→`form_view.rng`、list→`tree_view.rng`、search→`search_view.rng`）。建议校验器复用 Odoo 的 RNG（或等价生成的校验器）作为"合法 arch"的**终极权威**，本 DSL 的 IR 级检查是前置快筛，不替代 RNG。
 - **`extra` 键复核**：`field.extra` 的每个键必须存在于目标 RNG 的 `field` 属性集中；未知键判 **ERROR**（防止拼写漂移，如 `decoation-danger`）。
+
+### 6.6 切片层卡控（Layered inheritance 的 QA 落地）
+
+- **不静默降级**：`inherit` 既非本 binding 内层 id、又非含 `.` 的字面外部 xml_id 时，生成器必须判 **ERROR**，不得产出没有 `inherit_id` 的 extension 记录。
+- **不静默丢数据**：extension 带 `elements`、primary 带 `patches` 均判 **ERROR**；生成器只消费 `patches`，任何会被忽略的内容都必须先在契约/IR 层被拒绝。
+- **切片内元素与主视图同标准**：`patches[].elements` 必须同样通过 `ELEMENT_UNKNOWN_KIND` / `ELEMENT_SCOPE_VIOLATION` / `RAW_MISSING_REASON` / `EXTRA_KEY_UNKNOWN` 四项检查——切片不是校验盲区。
+- **position 与载荷互斥**：`attributes` 只收 `attrs`（≥1 项且带 `name`）；`inside/after/before/replace` 只收 `elements`；`xpath` 非空。混用判 **ERROR**，空 patch（非 `replace`）判 **WARNING**。
+- **定位键唯一性（`PATCH_XPATH_UNSTABLE`）**：`patch.xpath` 只允许以 `@name` 定位，禁用 `@string` / `@for`。`string` 可翻译且可重复，`for` 亦可重复，二者可能命中多个节点，破坏切片的可预测性。无 `name` 的容器（group/page/notebook/…）不自动生成 xpath：设计器会给提示并引导用内部字段作锚点；反向转换遇到存量 `@string` xpath 时保留原文但显式告警。
+- **层栈收敛**：视图 id 唯一；有且仅有一个 primary，或全体切片收敛到外部基视图；inherit 目标存在、不成环、指向前序层。
+
+### 6.7 自定义注册表卡控（§2.1 的 QA 落地）
+
+- **先声明后引用，不静默降级**：`binding.viewType` 若不属于 Odoo 标准类型、不等于兼容字面 `custom`，则**必须**在 `viewTypes[]` 注册，否则报 `CUSTOM_TYPE_UNREGISTERED`（ERROR）——避免把拼写错误的类型名当标准视图生成无效 arch。
+- **引用完整性**：`{kind: customElement, ref}` 的 `ref` 必须命中 `viewElements[]` 的 id，否则报 `CUSTOM_ELEMENT_UNREGISTERED`（ERROR）；注册项 id 唯一、不得与内置 `kind` 或标准 view type 重名。
+- **props 契约**：引用处必须提供注册项标记 `required: true` 的 prop（有 `default` 的由生成器补值），未知 prop 报 ERROR；生成器把 props 逐键写为标签属性，不静默丢弃。
+- **自定义动作**：`actions[].type=client` 必须带非空 `tag`（可引用 `viewTypes[].tag` 或含 `.` 的字面 tag）；生成器产出 `ir.actions.client`（`tag`/`params`/`context`），不改写全局 assets bundle。
+- **未使用声明**：注册项未被任何 binding / 元素引用时报 `CUSTOM_*_UNUSED`（WARNING），提示清理，不阻塞生成。
+- **反向转换**：命中 `viewElements[].tag` 的 arch 标签反转为 `customElement + ref`；注册表本身无法从 arch 推断，反向产物需人工补回 `viewTypes[]` / `viewElements[]`（与 `compositions/actions/menus` 的既有已知限制一致）。
 
 ---
 
 ## 7. 参考样例
+
+> 三类自定义注册表（§2.1）的完整端到端样例见 `examples/custom_registry.yaml`（`viewTypes[]` / `viewElements[]` / `actions[].type=client`），全链路回归见 `tests/test_custom_registry.py`；设计器编排见 `designer/README.md`。
 
 ### 7.1 ViewTypeBinding：一组 views 经 inherit 合并为该类型最终结果（标准，后端 A）
 ```yaml

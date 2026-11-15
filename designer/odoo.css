@@ -6,6 +6,28 @@
  * o_notebook / o_form_statusbar 等。
  * ========================================================================= */
 
+/* ── modern-web-guidance：浏览器 UI 主题与可达性 ───────────────────────────
+ * 设计器为浅色主题原型：显式声明 color-scheme，使原生控件（下拉箭头、复选框、
+ * 滚动条）与页面配色一致；品牌化滚动条与 accent-color；统一键盘焦点环；
+ * 交互命中区 ≥ 24px（见 .o_ctx_toolbar button）。
+ * -------------------------------------------------------------------------- */
+html, :root { color-scheme: light; }
+/* 品牌化滚动条 + 预留轨道宽度，避免内容加载时布局抖动（scrollbar-gutter: stable） */
+html {
+  scrollbar-color: #cbd5e1 #f1f5f9;   /* thumb / track */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+/* 统一键盘焦点环：所有可聚焦元素一致可见 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #159b80;
+  outline-offset: 2px;
+}
+/* 原生控件品牌色（复选框 / 单选 / range / progress） */
+:where(input, select, textarea) { accent-color: #21b799; font: inherit; }
+/* 自定义滚动容器沿用同款品牌滚动条 */
+.o_form_sheet_bg, .o_form_view { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+
 .o_form_view {
   position: relative;
   background: #f7f7f7;
@@ -208,20 +230,129 @@ select.o_input { appearance: none; -webkit-appearance: none; background-image: l
 .o_alert.logic { background: #eef3ff; border-color: #cdd8f3; color: #335; }
 .o_alert.sel { outline: 2px solid #21b799; outline-offset: 1px; }
 
-/* ── 落位区 ── */
-.o_form_dropzone {
-  border: 2px dashed #cfd8dc; border-radius: 6px; padding: 10px;
-  text-align: center; color: #888; font-size: 12px; margin: 8px 0; cursor: copy;
+/* ── 焦点跟随的上下文操作条（取代常驻停靠区 / 悬浮按钮）──
+ * 仅在「鼠标焦点所在、且可编辑」的元素上方出现：容器 → ＋字段（展开模型字段下拉）
+ * 且自身即拖放落点；任意可编辑元素 → ✎ 编辑 / 🗑 删除。键盘 / 选中态也会锚定到
+ * 选中元素，保证键盘可达（modern-web-guidance：显式 <button> + 焦点 containment）。
+ * 固定定位（position: fixed），不随画布滚动抖动；z-index 高于画布。 */
+.o_ctx_toolbar {
+  position: fixed; z-index: 60; display: none;
+  gap: 4px; align-items: center; padding: 4px 6px;
+  background: #fff; border: 1px solid #21b799; border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  font-size: 12px; line-height: 1;
 }
-.o_form_dropzone.over { border-color: #21b799; background: #eafaf6; color: #1a7f6b; }
+.o_ctx_toolbar.show { display: flex; }
+.o_ctx_toolbar button {
+  min-width: 24px; min-height: 24px;   /* modern-web-guidance: ≥24px 命中区 */
+  padding: 0 8px; height: 24px;
+  border: 1px solid #21b799; border-radius: 5px;
+  background: #fff; color: #1a7f6b; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.o_ctx_toolbar button:hover { background: #21b799; color: #fff; }
+.o_ctx_toolbar button:focus-visible { outline: 2px solid #159b80; outline-offset: 1px; }
+.o_ctx_toolbar .o_ctx_add { font-weight: 600; }
+.o_ctx_toolbar select {
+  height: 24px; border: 1px solid #ced4da; border-radius: 5px;
+  padding: 0 4px; font-size: 12px; background: #fff; color: #333;
+}
+.o_ctx_toolbar.o_ctx_drop { border-color: #fb923c; box-shadow: 0 4px 14px rgba(251, 146, 60, .35); }
+.o_ctx_toolbar.o_ctx_drop::after {
+  content: "⤵ 拖放到此添加"; font-size: 11px; color: #c2410c; padding-left: 4px;
+}
+
+/* 被上下文操作条锚定的宿主：轻微描边，提示「此处可操作」 */
+.o_ctx_host > * { box-shadow: 0 0 0 1px #21b799; }
 
 /* ── 切片预览（在基础层上标注继承修改）── */
 .o_slice_target { position: relative; outline: 2px dashed #8b5cf6; outline-offset: 1px; }
+.o_slice_target.o_slice_inherited { outline-color: #cbd5e1; }
 .o_slice_badge {
   display: inline-block; margin: 4px 0 2px; padding: 3px 9px; border-radius: 6px;
   font-size: 11px; background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe;
 }
+.o_slice_badge.current { border-color: #c4b5fd; font-weight: 600; }
+.o_slice_badge.inherited { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
 .o_slice_note {
   margin: 8px 0; padding: 7px 10px; border-radius: 6px; font-size: 12px;
   background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
 }
+.o_slice_insert {
+  margin: 4px 0 6px; padding: 5px 9px; border-radius: 6px; font-size: 11px;
+  background: #f5f3ff; color: #5b21b6; border: 1px dashed #c4b5fd;
+}
+.o_slice_replaced { opacity: .45; text-decoration: line-through; }
+
+/* ── 结构条：<header> / <footer> ──────────────────────────────
+ * 画布仿真节点用 <div> 承载：它们是被编辑视图的可视化投影，不是本页的文档区域，
+ * 用真实 <header>/<footer> 会给设计器页面带来第二个 banner/contentinfo landmark。
+ * ------------------------------------------------------------------ */
+.o_form_header_region { position: relative; padding-top: 20px; }
+.o_form_header_region.sel > .o_form_statusbar,
+.o_form_footer.sel { outline: 2px solid #714b67; outline-offset: 1px; }
+.o_struct_tag {
+  position: absolute; top: 2px; left: 2px;
+  padding: 1px 7px; border-radius: 4px; font-size: 10px; letter-spacing: .04em;
+  color: #5b21b6; background: #ede9fe; border: 1px solid #ddd6fe;
+}
+.o_form_footer {
+  position: relative; margin-top: 6px; padding: 22px 10px 10px;
+  background: #fff; border: 1px solid #d6d6d6; border-top: none;
+  border-radius: 0 0 3px 3px;
+}
+.o_form_footer > .o_struct_tag { top: 4px; left: 8px; }
+.o_form_footer_buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+/* 结构条作为普通容器出现时（切片 patch 元素 / 非 form 根位置） */
+.o_struct_box { border: 1px dashed #a78bfa; border-radius: 8px; padding: 8px; margin: 8px 0; background: #faf8ff; }
+.o_struct_box.sel { outline: 2px solid #714b67; }
+.o_struct_title { font-size: 11px; color: #5b21b6; margin-bottom: 6px; }
+.o_struct_children { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+
+/* ── 通用布局块 <div> / 独立 <label> ──────────────────────
+ * 二者都用 <div> 仿真：画布节点是「被编辑视图」的投影，孤立 <label>
+ * 没有关联控件会污染设计器页面的表单语义（见 designer/README.md）。
+ * ------------------------------------------------------------------ */
+.o_layout_div {
+  border: 1px dashed #94a3b8; border-radius: 8px; padding: 8px 10px;
+  margin: 8px 0; background: #f8fafc;
+}
+.o_layout_div.sel { outline: 2px solid #714b67; outline-offset: 1px; }
+.o_layout_div_tag {
+  display: inline-block; margin-bottom: 6px; padding: 1px 7px; border-radius: 4px;
+  font-size: 10px; color: #475569; background: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.o_dsl_label { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.o_label_meta {
+  font-size: 10px; color: #64748b; background: #f1f5f9;
+  border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── 自定义 view type / view element 的画布投影（§2.1）────────
+ * 一律用 <div> 承载：它们是「被编辑视图」的可视化，不是设计器页面的
+ * 文档区域，也不把用户写的 Odoo tag 当成真实 DOM 标签名。
+ * ------------------------------------------------------------------ */
+.o_custom_type_banner {
+  margin: 0 0 10px; padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; color: #5b21b6;
+  background: #ede9fe; border: 1px solid #ddd6fe;
+}
+.o_custom_element {
+  display: inline-block; margin: 6px 8px 6px 0; padding: 7px 10px;
+  border: 1px solid #c4b5fd; border-radius: 8px; background: #faf8ff;
+  vertical-align: top; min-inline-size: 120px;
+}
+.o_custom_element.sel { outline: 2px solid #714b67; outline-offset: 1px; }
+.o_custom_tag {
+  font-size: 11px; font-weight: 600; color: #5b21b6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.o_custom_props {
+  margin-top: 4px; font-size: 10px; color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+.o_custom_warn { margin-top: 4px; font-size: 10px; color: #b91c1c; }

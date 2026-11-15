@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Tuple
 
 from lxml import etree
 
-from .model import collect_fragments, normalize_binding
+from .model import collect_fragments, normalize_binding, resolve_custom_type
 from .qweb_ir import element_to_node
 
 
@@ -33,24 +33,36 @@ def _template_inner_xml(elements: List[Dict], fragments: Dict) -> str:
     return etree.tostring(root, encoding="unicode")
 
 
-def generate_custom_view(view: Dict, binding: Dict, module: str = "dsl_gen") -> Dict:
-    """单个自定义 View → 文件集合 + action 记录。"""
+def generate_custom_view(view: Dict, binding: Dict, module: str = "dsl_gen",
+                          typedef: Dict | None = None,
+                          view_elements: Dict[str, Dict] | None = None) -> Dict:
+    """单个自定义 View → 文件集合 + action 记录。
+
+    typedef: `viewTypes[]` 注册项（§2.1）。注册表为权威：类型键、组件类名、模板名、
+    client action tag、services/props 契约均以它为准；view 级同名字段仅补齐未声明项。
+    未传时按 view 自身字段合成（兼容 `custom: true` 的旧写法）。
+    """
     binding = normalize_binding(binding)
     model = view.get("model") or binding.get("model")
-    vtype = view.get("viewType") or binding.get("viewType") or "custom"
     name = view.get("name") or view.get("id") or "custom"
     vid = view.get("id") or _slug(name)
-    tag = f"{module}.{vid}"
-    cls = view.get("className") or _pascal(vid)
-    tmpl = f"{module}.{vid}"
-    services: List[str] = view.get("services", []) or []
-    props: List[str] = view.get("props", []) or []
+    typedef = typedef or {}
+    # 类型键：注册项 id（→ ir.ui.view.type / view_mode / view_registry）；
+    # 旧兼容写法退化为 view.id。
+    type_key = typedef.get("id") or vid
+    cls = typedef.get("className") or view.get("className") or _pascal(type_key)
+    tmpl = typedef.get("template") or f"{module}.{vid}"
+    tag = typedef.get("tag") or f"{module}.{type_key}"
+    alias = f"{module}.{vid}"
+    services: List[str] = typedef.get("services") or view.get("services") or []
+    props: List[str] = typedef.get("props") or view.get("props") or []
     fragments = collect_fragments(binding)
+    view_elements = view_elements or {}
 
     # —— JS 组件（禁 getters、禁 patch、显式 services） ——
     svc_lines = "\n".join(f"        this.{s} = useService({s!r});" for s in services)
     prop_lines = "\n".join(f"        // prop: {p}" for p in props)
-    js = f'''/** @odoo-module alias={tag} */
+    js = f'''/** @odoo-module alias={alias} */
 import {{ Component }} from "@odoo/owl";
 import {{ useState }} from "@odoo/owl";
 import {{ useService }} from "@web/core/utils/hooks";
@@ -78,26 +90,26 @@ export class {cls} extends Component {{
 registry.category("actions").add({tag!r}, {cls});
 
 // 注册为视图类型（G2）：可作为 ir.actions.act_window 的 view_mode 出现，
-// 需配套 ir.ui.view(type={vid!r})（见本生成器产出的 ir.ui.view 记录）。
+// 需配套 ir.ui.view(type={type_key!r})（见本生成器产出的 ir.ui.view 记录）。
 // Model / Controller 若需拉取数据，可在子类中补充（static Model / static Controller）。
 class {cls}View extends View {{
-    static type = {vid!r};
+    static type = {type_key!r};
     static Renderer = {cls};
 }}
-registry.category("views").add({vid!r}, {cls}View);
+registry.category("views").add({type_key!r}, {cls}View);
 '''
     # —— XML QWeb 模板（t-name 根，复用 QWeb IR） ——
     tname = etree.Element("t", {"t-name": tmpl, "t-att-role": "'region'",
                                 "t-att-aria-label": f"{name!r}"})
     for el in view.get("elements", []):
-        tname.append(element_to_node(el, "custom", fragments))
+        tname.append(element_to_node(el, "custom", fragments, view_elements))
     templates = etree.Element("templates")
     templates.append(tname)
     etree.indent(templates, space="    ")
     xml = '<?xml version="1.0" encoding="utf-8"?>\n' + etree.tostring(templates, encoding="unicode")
 
     # —— SCSS ——
-    scss = f""".{name} {{\n    /* DSL 生成的基础样式；自定义样式在此追加 */\n}}\n"""
+    scss = f""".{_slug(name)} {{\n    /* DSL 生成的基础样式；自定义样式在此追加 */\n}}\n"""
 
     files = [
         (f"static/src/js/{vid}.js", js),
@@ -112,16 +124,18 @@ registry.category("views").add({vid!r}, {cls}View);
     }
     if model:
         action_fields["res_model"] = model
-    if view.get("context"):
-        action_fields["context"] = view["context"]
+    ctx = typedef.get("context") or view.get("context")
+    if ctx:
+        action_fields["context"] = ctx
     action_record = {
         "xml_id": f"{module}.action_{vid}",
         "model": "ir.actions.client",
         "fields": action_fields,
     }
     # —— ir.ui.view（自定义视图类型，G1/G2）——
-    # type=vid（自定义类型键，与 JS view_registry 注册键一致），arch 根标签即该键；
-    # 真实渲染由 OWL 组件接管。配合 act_window 的 view_mode/view_ids 即可作为视图出现。
+    # type=type_key（viewTypes[] 注册项 id / 旧兼容写法为 view.id），
+    # 与 JS view_registry 注册键一致；arch 根标签即该键，真实渲染由 OWL 组件接管。
+    # 配合 act_window 的 view_mode/view_ids 即可作为视图出现。
     # 注：真实 Odoo 模块需在 __manifest__/模型上把该类型 selection_add 到 ir.ui.view.type。
     view_record = {
         "xml_id": f"{module}.view_{vid}",
@@ -129,26 +143,37 @@ registry.category("views").add({vid!r}, {cls}View);
         "fields": {
             "name": view.get("name") or name,
             "model": model,
-            "type": vid,
+            "type": type_key,
             "mode": "primary",
         },
-        "arch": f"<{vid}/>",
+        "arch": f"<{type_key}/>",
         "inherit": None,
     }
     return {"files": files, "action": action_record, "view": view_record,
-            "tag": tag, "template": tmpl, "class": cls}
+            "tag": tag, "template": tmpl, "class": cls, "type": type_key,
+            "view_id": vid}
 
 
-def binding_custom_records(binding: Dict, module: str = "dsl_gen") -> Tuple[List, List, List]:
-    """ViewTypeBinding（custom）→ 所有自定义 View 的文件 + action 记录 + ir.ui.view 记录。"""
+def binding_custom_records(binding: Dict, module: str = "dsl_gen",
+                           registry: Dict[str, Dict[str, Dict]] | None = None,
+                           view_elements: Dict[str, Dict] | None = None
+                           ) -> Tuple[List, List, List]:
+    """ViewTypeBinding（自定义）→ 所有自定义 View 的文件 + action 记录 + ir.ui.view 记录。
+
+    自定义判定统一交给 `model.resolve_custom_type`：注册表类型键命中优先，
+    否则兼容 `custom: true` / `viewType: custom` 的隐式注册项。
+    """
     binding = normalize_binding(binding)
     all_files: List[Tuple[str, str]] = []
     action_records: List[Dict] = []
     view_records: List[Dict] = []
     for v in binding.get("views", []):
-        if (v.get("viewType") or binding.get("viewType")) == "custom" or v.get("custom"):
-            res = generate_custom_view(v, binding, module)
-            all_files.extend(res["files"])
-            action_records.append(res["action"])
-            view_records.append(res["view"])
+        is_custom, typedef = resolve_custom_type(binding, v, registry)
+        if not is_custom:
+            continue
+        res = generate_custom_view(v, binding, module, typedef=typedef,
+                                    view_elements=view_elements)
+        all_files.extend(res["files"])
+        action_records.append(res["action"])
+        view_records.append(res["view"])
     return all_files, action_records, view_records

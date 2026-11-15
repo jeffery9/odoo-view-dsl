@@ -1,0 +1,121 @@
+# 三类自定义的一等注册表样例（§2.1）：view type / view element / action
+# - viewTypes[]    自定义视图类型：具名类型键 partner_board → OWL 组件 + view_registry + ir.actions.client
+# - viewElements[] 自定义元素：status_badge / metric_tile → 标签 + props 契约，元素用 customElement.ref 引用
+# - actions[]       显式自定义客户端动作：type=client + tag（不再只能由后端 B 隐式生成）
+# DSL 只负责「定义 + 接入」；OWL 组件的 JS 业务逻辑仍归 OWL（规范 §0.7）。
+module: dsl_custom_registry
+
+viewTypes:
+  - id: partner_board
+    name: Partner Board
+    className: PartnerBoard
+    services:
+      - rpc
+      - notification
+    props:
+      - partnerId
+    tag: dsl_custom_registry.partner_board
+    description: 伙伴看板（注册表是类型契约，不是 JS 代码生成器）
+
+viewElements:
+  - id: status_badge
+    tag: StatusBadge
+    description: 状态徽标（OWL 组件实现归业务代码）
+    props:
+      - name: state
+        required: true
+      - name: label
+        default: 状态
+  - id: metric_tile
+    tag: MetricTile
+    description: 指标磁贴
+    props:
+      - name: value
+        required: true
+      - name: caption
+
+bindings:
+  # ── 标准 list：与其它视图一起进入 Composition ──
+  - model: res.partner
+    viewType: list
+    prefix: partner_list
+    views:
+      - id: partner_list_main
+        mode: primary
+        name: Partner List
+        elements:
+          - kind: field
+            name: name
+          - kind: field
+            name: email
+
+  # ── 具名自定义 view type：binding.viewType 引用 viewTypes[].id ──
+  - model: res.partner
+    viewType: partner_board
+    prefix: partner_board
+    custom: true
+    views:
+      - id: partner_board_main
+        mode: primary
+        name: Partner Board
+        elements:
+          - kind: customElement
+            ref: status_badge
+            props:
+              state: state
+          - kind: div
+            class: o_board_tiles
+            children:
+              - kind: customElement
+                ref: metric_tile
+                props:
+                  value: partner_count
+                  caption: 伙伴总数
+              - kind: field
+                name: name
+
+compositions:
+  - kind: act_window
+    id: partner_action
+    model: res.partner
+    name: 伙伴（列表 + 自定义看板）
+    views:
+      - viewType: list
+      - viewType: partner_board      # 具名自定义类型直接进入 view_mode
+        ref: partner_board_main      # ref 指向配套 ir.ui.view 的 view id
+    target: current
+
+# 怎么被打开：显式 client action + 既有 url action
+actions:
+  - id: open_board
+    type: client
+    name: 打开伙伴看板
+    tag: dsl_custom_registry.partner_board
+    params:
+      defaultTab: all
+    target: current
+  - id: open_docs
+    type: url
+    name: Odoo 文档
+    url: https://www.odoo.com/documentation
+    target: new
+
+menus:
+  - id: partner_root
+    name: 合作伙伴
+    sequence: 10
+  - id: partner_menu
+    name: 伙伴（组合视图）
+    parent: partner_root
+    action: partner_action
+    sequence: 10
+  - id: board_menu
+    name: 独立看板（client action）
+    parent: partner_root
+    action: open_board
+    sequence: 20
+  - id: docs_menu
+    name: 文档（外链）
+    parent: partner_root
+    action: open_docs
+    sequence: 30

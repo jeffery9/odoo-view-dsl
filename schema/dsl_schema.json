@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://odoo-view-dsl/schema/dsl_schema.json",
   "title": "Odoo 统一视图 DSL（Unified View DSL）",
-  "description": "统一视图 DSL 的结构契约（JSON Schema Draft 2020-12）。覆盖四层模型：Element → View → ViewTypeBinding(inherit 合并) → Composition，与 docs/dsl_qweb_owl_specification.md §2 IR 一一对应；YAML/JSON 书写均适用（加载器二者皆收）。本 schema 的 kind 枚举对齐「已实现」的生成器/校验器 KNOWN_KINDS；spec §2 还列出的 image/html/newline/header/searchpanel/groupby/control 尚未进入生成器，故此处暂不纳入枚举，以免放过生成器会拒绝的输入。属性长尾一律走 field.extra（Record）或元素级 additionalProperties，符合规范「奥卡姆 + 不静默降级」。",
+  "description": "统一视图 DSL 的结构契约（JSON Schema Draft 2020-12）。覆盖四层模型：Element → View → ViewTypeBinding(inherit 合并) → Composition，与 docs/dsl_qweb_owl_specification.md §2 IR 一一对应；YAML/JSON 书写均适用（加载器二者皆收）。本 schema 的 kind 枚举对齐「已实现」的生成器/校验器 KNOWN_KINDS；spec §2 还列出的 image/html/newline/searchpanel/groupby/control 尚未进入生成器，故此处暂不纳入枚举，以免放过生成器会拒绝的输入。header/footer 已作为一等结构元素纳入（限 form/list、form）。属性长尾一律走 field.extra（Record）或元素级 additionalProperties，符合规范「奥卡姆 + 不静默降级」。",
   "type": "object",
   "required": ["module", "bindings"],
   "additionalProperties": false,
@@ -18,6 +18,16 @@
       "description": "ViewTypeBinding 列表：每个 (model, viewType) 下的一组 View",
       "items": { "$ref": "#/$defs/ViewTypeBinding" }
     },
+    "viewTypes": {
+      "type": "array",
+      "description": "自定义 view type 注册表：先声明类型键与 OWL 组件契约，binding.viewType 再具名引用（先声明后引用，引用完整性由 IR 校验器兜底）",
+      "items": { "$ref": "#/$defs/CustomViewType" }
+    },
+    "viewElements": {
+      "type": "array",
+      "description": "自定义 view element 注册表：把新元素 id 映射到 QWeb/OWL 标签与 props 契约；Element 用 kind=customElement + ref 引用",
+      "items": { "$ref": "#/$defs/CustomViewElement" }
+    },
     "compositions": {
       "type": "array",
       "description": "Composition 列表：多个 view type 的最终结果组合为屏幕",
@@ -25,7 +35,7 @@
     },
     "actions": {
       "type": "array",
-      "description": "顶层 actions[]：非视图类 opener（怎么被打开）—— act_url / act_server。视图类 opener 由 Composition 生成（ir.actions.act_window / client）",
+      "description": "顶层 actions[]：非视图类 opener（怎么被打开）—— act_url / act_server / client（自定义 tag）。视图类 opener 由 Composition 生成（ir.actions.act_window / client）",
       "items": { "$ref": "#/$defs/Action" }
     },
     "menus": {
@@ -35,6 +45,45 @@
     }
   },
   "$defs": {
+    "CustomViewType": {
+      "type": "object",
+      "required": ["id"],
+      "description": "自定义 view type 注册项。id 即类型键（→ ir.ui.view.type / view_mode / view_registry），由后端 B 生成 OWL 三件套 + 客户端 action；未被任何 binding 引用会报 WARNING。",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$", "description": "类型键（不得与 Odoo 标准类型同名）" },
+        "name": { "type": "string", "description": "显示名" },
+        "className": { "type": "string", "description": "OWL 组件类名（缺省由 id 推导 PascalCase）" },
+        "template": { "type": "string", "description": "QWeb 模板名（缺省 module.id）" },
+        "tag": { "type": "string", "description": "ir.actions.client 的 tag（缺省 module.id）" },
+        "services": { "type": "array", "items": { "type": "string" }, "description": "显式声明的 OWL services（禁隐式注入）" },
+        "props": { "type": "array", "items": { "type": "string" }, "description": "prop 名列表（进入组件 setup 契约注释）" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ViewElementProp": {
+      "type": "object",
+      "required": ["name"],
+      "description": "自定义元素的 prop 契约项",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean", "default": false },
+        "default": { "description": "缺省值（引用时省略该 prop 则取此值）" }
+      },
+      "additionalProperties": false
+    },
+    "CustomViewElement": {
+      "type": "object",
+      "required": ["id"],
+      "description": "自定义 view element 注册项。id 是 DSL 中的引用名，tag 是实际写入 arch / QWeb 的标签名（缺省 = id）；props 是引用时必须满足的契约。",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$", "description": "引用名（不得与内置 kind 同名）" },
+        "tag": { "type": "string", "description": "实际标签名（可为 OWL 组件 PascalCase 名）" },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/ViewElementProp" } },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "Expr": {
       "description": "Odoo 表达式：字符串表达式（如 'state==\"active\"'）或原生结构（domain/context 的列表，如 [['user_id','=','uid']]）",
       "type": ["string", "array", "boolean", "number", "null"]
@@ -56,11 +105,12 @@
         "kind": {
           "enum": [
             "field", "group", "notebook", "page", "button", "separator", "label",
-            "filter", "subview", "component", "if", "foreach", "set", "slot",
-            "dynamicAttr", "call", "raw"
+            "div", "header", "footer", "filter", "subview", "component", "if", "foreach", "set", "slot",
+            "dynamicAttr", "call", "raw", "customElement"
           ]
         },
         "name": { "type": "string" },
+        "ref": { "type": "string", "description": "kind=customElement：引用 viewElements[] 注册项的 id（先声明后引用）" },
         "string": { "type": "string" },
         "groups": { "type": "string" },
         "invisible": { "$ref": "#/$defs/Expr" },
@@ -101,6 +151,7 @@
         },
         "children": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
         "pages": { "type": "array", "items": { "$ref": "#/$defs/Page" } },
+        "class": { "type": "string", "description": "布局/结构容器（div/group/label/header/footer…）透传到 arch 的 CSS class 属性" },
         "className": { "type": "string", "description": "自定义视图：OWL 组件类名" },
         "services": { "type": "array", "items": { "type": "string" }, "description": "自定义视图：显式声明的 OWL services" },
         "priority": { "type": "integer" }
@@ -110,6 +161,8 @@
         { "if": { "properties": { "kind": { "const": "field" } } }, "then": { "required": ["name"] } },
         { "if": { "properties": { "kind": { "const": "notebook" } } }, "then": { "required": ["pages"] } },
         { "if": { "properties": { "kind": { "const": "page" } } }, "then": { "required": ["string"] } },
+        { "if": { "properties": { "kind": { "const": "header" } } }, "then": { "required": ["children"], "description": "form/list 顶部条：必须是根 elements 的首个元素，内含 button / statusbar 字段" } },
+        { "if": { "properties": { "kind": { "const": "footer" } } }, "then": { "required": ["children"], "description": "form 底部条：必须是根 elements 的末尾元素，内含 button 等" } },
         { "if": { "properties": { "kind": { "const": "button" } } }, "then": { "required": ["string"] } },
         { "if": { "properties": { "kind": { "const": "filter" } } }, "then": { "required": ["name"] } },
         { "if": { "properties": { "kind": { "const": "subview" } } }, "then": { "required": ["viewRef"] } },
@@ -120,7 +173,8 @@
         { "if": { "properties": { "kind": { "const": "slot" } } }, "then": { "required": ["name"] } },
         { "if": { "properties": { "kind": { "const": "dynamicAttr" } } }, "then": { "required": ["attr", "value"] } },
         { "if": { "properties": { "kind": { "const": "call" } } }, "then": { "required": ["name"] } },
-        { "if": { "properties": { "kind": { "const": "raw" } } }, "then": { "required": ["qweb", "reason"] } }
+        { "if": { "properties": { "kind": { "const": "raw" } } }, "then": { "required": ["qweb", "reason"] } },
+        { "if": { "properties": { "kind": { "const": "customElement" } } }, "then": { "required": ["ref"] } }
       ]
     },
     "Page": {
@@ -144,8 +198,8 @@
         "model": { "type": "string" },
         "viewType": { "type": "string" },
         "mode": { "enum": ["primary", "extension"], "default": "primary" },
-        "inherit": { "type": "string", "description": "父视图 id（→ inherit_id）；extension 必填" },
-        "priority": { "type": "integer" },
+        "inherit": { "type": "string", "description": "父视图 id（本 binding 内的层 id），或含 '.' 的字面外部 xml_id（跨模块基视图）→ inherit_id；extension 必填" },
+        "priority": { "type": "integer", "description": "层序 / ir.ui.view.priority。同一 (model,viewType) 内按 priority 升序合并，设计器以层栈顺序自动维护（16 + 层索引）。" },
         "groups": { "type": "string" },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
         "patches": { "type": "array", "items": { "$ref": "#/$defs/Patch" } },
@@ -159,21 +213,39 @@
       "allOf": [
         {
           "if": { "properties": { "mode": { "const": "extension" } }, "required": ["mode"] },
-          "then": { "required": ["inherit"] }
+          "then": { "required": ["inherit"], "not": { "required": ["elements"] } }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "primary" } }, "required": ["mode"] },
+          "then": { "not": { "anyOf": [{ "required": ["patches"] }, { "required": ["inherit"] }] } }
+        },
+        {
+          "if": { "not": { "required": ["mode"] } },
+          "then": { "not": { "anyOf": [{ "required": ["patches"] }, { "required": ["inherit"] }] } }
         }
       ]
     },
     "Patch": {
       "type": "object",
       "required": ["xpath", "position"],
-      "description": "extension 视图对父 arch 的 xpath/position 修改（→ Odoo inherit 机制）",
+      "description": "切片（extension 视图）对父 arch 的 xpath/position 修改（→ Odoo inherit 机制）。position=attributes 只接受 attrs；其它 position 只接受 elements（replace 允许空 elements，表示删除目标节点）。",
       "properties": {
-        "xpath": { "type": "string" },
+        "xpath": { "type": "string", "minLength": 1, "description": "父 arch 中的唯一定位表达式；只允许 @name 作为定位键，禁用可重复的 @string/@for（IR 校验器报 PATCH_XPATH_UNSTABLE）" },
         "position": { "enum": ["inside", "after", "before", "replace", "attributes"] },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/Element" } },
         "attrs": { "type": "array", "items": { "$ref": "#/$defs/AttrPatch" } }
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "position": { "const": "attributes" } }, "required": ["position"] },
+          "then": { "required": ["attrs"], "properties": { "attrs": { "minItems": 1 } }, "not": { "required": ["elements"] } }
+        },
+        {
+          "if": { "properties": { "position": { "enum": ["inside", "after", "before", "replace"] } }, "required": ["position"] },
+          "then": { "not": { "required": ["attrs"] } }
+        }
+      ]
     },
     "AttrPatch": {
       "type": "object",
@@ -204,7 +276,7 @@
     "ViewTypeBinding": {
       "type": "object",
       "required": ["model", "viewType", "views"],
-      "description": "视图类型绑定：某 (model, viewType) 下的一组 View，即有序「继承层栈」——层 0 = 基础层(primary)，其余 = 切片层(extension, inherit 基础层)；切片通过 patches(xpath/position) 在基础层上做修改。Odoo 运行时沿 inherit 链合并为该类型最终结果。",
+      "description": "视图类型绑定：某 (model, viewType) 下的一组 View，即有序「继承层栈」——层 0 = 基础层(primary)，其余 = 切片层(extension, inherit 前序层或含 '.' 的跨模块基视图)；切片通过 patches(xpath/position) 在父 arch 上做增量修改。Odoo 运行时沿 inherit 链、按 priority 升序合并为该类型最终结果（effective view）。",
       "properties": {
         "model": { "type": "string" },
         "viewType": { "type": "string" },
@@ -251,18 +323,26 @@
   "Action": {
     "type": "object",
     "required": ["id", "type"],
-    "description": "非视图类 opener（怎么被打开）。act_url / act_server；视图类 opener 由 Composition 生成。",
+    "description": "非视图类 opener（怎么被打开）。act_url / act_server / client（自定义 tag）；视图类 opener 由 Composition 生成。",
     "properties": {
       "id": { "type": "string" },
-      "type": { "enum": ["url", "server"], "description": "url→ir.actions.act_url；server→ir.actions.server" },
+      "type": { "enum": ["url", "server", "client"], "description": "url→ir.actions.act_url；server→ir.actions.server；client→ir.actions.client（自定义 OWL 客户端动作）" },
       "name": { "type": "string" },
       "url": { "type": "string", "description": "type=url：目标地址" },
-      "target": { "enum": ["new", "self", "download"], "description": "type=url：打开方式（默认 new）" },
+      "target": { "enum": ["new", "self", "download", "current", "fullscreen", "main"], "description": "打开方式（type=url / client）" },
       "model": { "type": "string", "description": "type=server：目标模型 xml_id（ref）" },
       "code": { "type": "string", "description": "type=server：Python 代码（state=code）" },
-      "state": { "type": "string", "description": "type=server：动作状态机（默认 code）" }
+      "state": { "type": "string", "description": "type=server：动作状态机（默认 code）" },
+      "tag": { "type": "string", "description": "type=client：客户端动作 tag（可引用 viewTypes[].tag 或字面 tag）" },
+      "params": { "type": "object", "description": "type=client：传给客户端动作的参数字典" },
+      "context": { "$ref": "#/$defs/Expr", "description": "type=client：action context" }
     },
-    "additionalProperties": true
+    "additionalProperties": true,
+    "allOf": [
+      { "if": { "properties": { "type": { "const": "url" } }, "required": ["type"] }, "then": { "required": ["url"] } },
+      { "if": { "properties": { "type": { "const": "server" } }, "required": ["type"] }, "then": { "required": ["model"] } },
+      { "if": { "properties": { "type": { "const": "client" } }, "required": ["type"] }, "then": { "required": ["tag"] } }
+    ]
   },
   "Menu": {
     "type": "object",
