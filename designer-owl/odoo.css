@@ -1,0 +1,560 @@
+/* =========================================================================
+ * Odoo View DSL · Designer — 画布仿真样式
+ * 近似 Odoo 社区（Community）浅色主题的表单 / 列表 / 搜索视图外观。
+ * 仅用于设计器画布预览，不影响 DSL 产物与生成器。
+ * 类名对齐 Odoo Web：o_form_view / o_form_sheet / o_group / o_field_widget /
+ * o_notebook / o_form_statusbar 等。
+ * ========================================================================= */
+
+/* ── modern-web-guidance：浏览器 UI 主题与可达性 ───────────────────────────
+ * 设计器为浅色主题原型：显式声明 color-scheme，使原生控件（下拉箭头、复选框、
+ * 滚动条）与页面配色一致；品牌化滚动条与 accent-color；统一键盘焦点环；
+ * 交互命中区 ≥ 24px（见 .o_ctx_toolbar button）。
+ * -------------------------------------------------------------------------- */
+html, :root { color-scheme: light; }
+/* 品牌化滚动条 + 预留轨道宽度，避免内容加载时布局抖动（scrollbar-gutter: stable） */
+html {
+  scrollbar-color: #cbd5e1 #f1f5f9;   /* thumb / track */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+/* 统一键盘焦点环：所有可聚焦元素一致可见 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #159b80;
+  outline-offset: 2px;
+}
+/* 原生控件品牌色（复选框 / 单选 / range / progress） */
+:where(input, select, textarea) { accent-color: #21b799; font: inherit; }
+/* 自定义滚动容器沿用同款品牌滚动条 */
+.o_form_sheet_bg, .o_form_view { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+
+.o_form_view {
+  position: relative;
+  background: #f7f7f7;
+  padding: 14px;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #333;
+  font-size: 13px;
+}
+.o_form_view.o_form_editable .o_form_sheet_bg { background: #f7f7f7; }
+.o_form_sheet_bg { padding: 0; }
+.o_form_sheet {
+  background: #fff;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 22px 28px;
+  border: 1px solid #d6d6d6;
+  border-top: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+  min-height: calc(100% - 1px);
+}
+.o_form_sheet_body { margin-top: 4px; }
+.o_form_sheet_body > .o_field_widget,
+.o_form_sheet_body > .o_horizontal_separator,
+.o_form_sheet_body > .o_alert,
+.o_form_sheet_body > .o_notebook { margin-bottom: 12px; }
+
+/* 空状态 */
+.o_empty { color: #888; padding: 40px; text-align: center; font-style: italic; }
+
+/* ── 状态栏（header）── */
+.o_form_statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 3px 3px 0 0;
+  padding: 5px 16px;
+  min-height: 34px;
+  margin-bottom: 0;
+}
+.o_statusbar_buttons { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.o_statusbar_status { display: flex; align-items: center; margin-left: auto; padding-left: 12px; }
+.o_form_statusbar > .o_node { display: inline-flex; align-items: center; }
+.o_form_statusbar > .o_node[data-widget="statusbar"] { margin-left: auto; }
+.o_form_statusbar .o_field_widget.o_statusbar_widget { display: block; }
+.o_form_statusbar .o_statusbar_status { margin-left: 0; padding-left: 0; }
+.o_form_footer_buttons > .o_node { display: inline-flex; }
+
+/* 状态 pills（chevron 箭头状） */
+.o_statusbar_item {
+  position: relative;
+  padding: 4px 14px 4px 20px;
+  font-size: 12px;
+  color: #a0a0a0;
+  background: #f0f0f0;
+  margin-right: 2px;
+  cursor: default;
+  white-space: nowrap;
+}
+.o_statusbar_item:first-child { border-top-left-radius: 3px; border-bottom-left-radius: 3px; padding-left: 14px; }
+.o_statusbar_item:last-child { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+.o_statusbar_item::before, .o_statusbar_item::after {
+  content: ''; position: absolute; top: 0; width: 0; height: 0; border-style: solid;
+}
+.o_statusbar_item::before { left: -9px; border-width: 11px 10px 11px 0; border-color: transparent #f0f0f0 transparent transparent; }
+.o_statusbar_item::after { right: -9px; border-width: 11px 0 11px 10px; border-color: transparent transparent transparent #f0f0f0; z-index: 1; }
+.o_statusbar_item:first-child::before { display: none; }
+.o_statusbar_item:last-child::after { display: none; }
+.o_statusbar_item.active { background: #21b799; color: #fff; }
+.o_statusbar_item.active::before { border-right-color: #21b799; }
+.o_statusbar_item.active::after { border-left-color: #21b799; }
+
+/* ── 按钮（对齐 Odoo .btn）── */
+.btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 12px; border: 1px solid #ced4da; border-radius: 3px;
+  background: #fff; font-size: 13px; color: #333; cursor: pointer; line-height: 1.4;
+}
+.btn:hover { filter: brightness(.97); }
+.btn-primary { background: #21b799; border-color: #1aa083; color: #fff; }
+.btn-secondary { background: #fff; color: #333; }
+.btn-danger { background: #dc3545; border-color: #c82333; color: #fff; }
+.btn.o_inline_btn { margin: 2px 0; }
+
+/* ── 分组（group）── */
+.o_group.o_inner_group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+  row-gap: 8px;
+  margin-bottom: 16px;
+}
+.o_group.o_inner_group.col1 { grid-template-columns: minmax(0, 1fr); }
+.o_group.o_inner_group.col3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.o_horizontal_separator {
+  grid-column: 1 / -1;
+  font-weight: 600; font-size: 14px; color: #333;
+  margin: 6px 0 4px; border-bottom: 1px solid #e0e0e0; padding-bottom: 2px;
+}
+
+/* ── 字段控件（field widget）── */
+.o_field_widget { display: flex; flex-direction: column; position: relative; cursor: pointer; }
+.o_form_label { display: block; font-size: 12px; color: #666; margin-bottom: 2px; }
+.o_form_label .o_required { color: #d9534f; }
+.o_form_label.o_standalone { font-size: 13px; font-weight: 600; color: #333; margin: 8px 0; }
+.o_ctl { position: relative; }
+
+.o_input {
+  width: 100%; padding: 5px 8px; border: 1px solid #ced4da; border-radius: 3px;
+  background: #fff; font-size: 13px; color: #333; font-family: inherit;
+}
+.o_input:focus { border-color: #21b799; outline: none; box-shadow: 0 0 0 2px rgba(33, 183, 153, .15); }
+select.o_input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, #666 50%), linear-gradient(135deg, #666 50%, transparent 50%); background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 24px; }
+
+.o_field_widget.o_required_modifier .o_input { border-color: #d9534f; }
+.o_field_widget.o_readonly_modifier .o_input { background: #f5f5f5; border: none; padding-left: 0; }
+.o_field_widget.o_readonly_modifier { color: #333; }
+.o_readonly_value { padding: 5px 0; color: #333; }
+textarea.o_input { resize: vertical; min-height: 62px; line-height: 1.5; }
+.o_ctl .o_statusbar_status { margin-left: 0; padding-left: 0; }
+.o_node.o_invisible_modifier { opacity: .5; }
+.o_node.o_invisible_modifier::after {
+  content: "invisible"; position: absolute; top: 0; right: 0;
+  font-size: 9px; color: #94a3b8;
+}
+
+.o_field_widget.o_invisible_modifier { display: none !important; }
+
+/* many2one 放大镜 */
+.o_field_many2one .o_ctl::after,
+.o_field_widget.o_field_many2one .o_ctl::after {
+  content: "🔍"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  opacity: .5; pointer-events: none; font-size: 12px;
+}
+
+/* many2many 标签 */
+.o_field_many2manytags {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  min-height: 30px; border: 1px solid #ced4da; border-radius: 3px; padding: 3px 6px; background: #fff;
+}
+.o_tag { display: inline-flex; align-items: center; gap: 4px; background: #e9f3f1; color: #1a7f6b; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.o_tag .x { cursor: pointer; opacity: .7; }
+.o_field_many2manytags .add { color: #999; cursor: pointer; }
+
+/* boolean */
+.o_field_boolean { width: 16px; height: 16px; align-self: flex-start; margin-top: 4px; }
+
+/* radio */
+.o_radio_group { display: flex; flex-wrap: wrap; gap: 12px; }
+.o_radio { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+
+/* 日期选择器 */
+.o_datepicker .o_ctl::after {
+  content: "📅"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  opacity: .6; pointer-events: none; font-size: 12px;
+}
+
+/* 数字 / 货币 */
+.o_field_monetary .o_ctl::before { content: "¤"; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #888; font-size: 12px; }
+.o_field_monetary .o_ctl .o_input { padding-left: 20px; }
+
+/* 附件 / 图片 */
+.o_attachment { border: 1px dashed #ced4da; border-radius: 3px; padding: 12px; text-align: center; color: #888; background: #fafafa; }
+
+/* 类型徽标 */
+.o_typebadge { font-size: 11px; color: #888; margin-top: 2px; }
+
+/* 选中高亮 */
+.o_field_widget.sel, .o_group.sel, .o_notebook.sel, .o_alert.sel, .o_form_label.sel {
+  outline: 2px solid #21b799; outline-offset: 1px; border-radius: 3px;
+}
+
+/* ── 笔记本（notebook）── */
+.o_notebook { margin: 8px 0 16px; }
+.o_notebook_headers { display: flex; border-bottom: 1px solid #dee2e6; }
+.o_notebook_tab {
+  padding: 8px 16px; font-size: 13px; cursor: pointer;
+  border-bottom: 2px solid transparent; color: #555;
+}
+.o_notebook_tab:hover { background: #f7f7f7; }
+.o_notebook_tab.active { border-bottom-color: #21b799; color: #21b799; font-weight: 600; }
+.o_notebook .tab-pane { padding: 12px 4px; }
+
+/* ── 列表视图（one2many / list viewType）── */
+.o_list_view { border: 1px solid #dee2e6; border-radius: 3px; overflow: hidden; margin: 4px 0; background: #fff; }
+.o_list_table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.o_list_table th {
+  background: #f3f3f3; text-align: left; padding: 6px 10px;
+  border-bottom: 1px solid #dee2e6; font-weight: 600; color: #555; white-space: nowrap;
+}
+.o_list_table td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; color: #333; }
+.o_list_table tbody tr:hover { background: #f9f9f9; }
+.o_list_add { display: block; padding: 6px 10px; color: #21b799; font-size: 12px; cursor: pointer; background: #fff; border-top: 1px solid #eee; }
+.o_list_add:hover { background: #eafaf6; }
+
+/* ── 搜索视图 ── */
+.o_search_panel { padding: 8px 0; }
+.o_search_title { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.o_search_filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.o_search_chip {
+  display: inline-flex; align-items: center; padding: 4px 12px;
+  border: 1px solid #ced4da; border-radius: 14px; background: #fff; font-size: 12px; cursor: pointer;
+}
+.o_search_chip:hover { border-color: #21b799; color: #21b799; }
+
+/* ── 逻辑 / 未知 标注 ── */
+.o_alert {
+  font-size: 12px; padding: 6px 10px; border-radius: 3px;
+  background: #fff3cd; border: 1px solid #ffe69c; color: #7a5b00; margin: 6px 0;
+}
+.o_alert.logic { background: #eef3ff; border-color: #cdd8f3; color: #335; }
+.o_alert.sel { outline: 2px solid #21b799; outline-offset: 1px; }
+
+/* ── 焦点跟随的上下文操作条（取代常驻停靠区 / 悬浮按钮）──
+ * 仅在「鼠标焦点所在、且可编辑」的元素上方出现：容器 → ＋字段（展开模型字段下拉）
+ * 且自身即拖放落点；任意可编辑元素 → ✎ 编辑 / 🗑 删除。键盘 / 选中态也会锚定到
+ * 选中元素，保证键盘可达（modern-web-guidance：显式 <button> + 焦点 containment）。
+ * 固定定位（position: fixed），不随画布滚动抖动；z-index 高于画布。 */
+.o_ctx_toolbar {
+  position: fixed; z-index: 60; display: none;
+  gap: 4px; align-items: center; padding: 4px 6px;
+  background: #fff; border: 1px solid #21b799; border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  font-size: 12px; line-height: 1;
+}
+.o_ctx_toolbar.show { display: flex; }
+.o_ctx_toolbar button {
+  min-width: 24px; min-height: 24px;   /* modern-web-guidance: ≥24px 命中区 */
+  padding: 0 8px; height: 24px;
+  border: 1px solid #21b799; border-radius: 5px;
+  background: #fff; color: #1a7f6b; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.o_ctx_toolbar button:hover { background: #21b799; color: #fff; }
+.o_ctx_toolbar button:focus-visible { outline: 2px solid #159b80; outline-offset: 1px; }
+.o_ctx_toolbar .o_ctx_add { font-weight: 600; }
+.o_ctx_toolbar select {
+  height: 24px; border: 1px solid #ced4da; border-radius: 5px;
+  padding: 0 4px; font-size: 12px; background: #fff; color: #333;
+}
+.o_ctx_toolbar.o_ctx_drop { border-color: #fb923c; box-shadow: 0 4px 14px rgba(251, 146, 60, .35); }
+.o_ctx_toolbar.o_ctx_drop::after {
+  content: "⤵ 拖放到此添加"; font-size: 11px; color: #c2410c; padding-left: 4px;
+}
+
+/* 被上下文操作条锚定的宿主：轻微描边，提示「此处可操作」 */
+.o_ctx_host > * { box-shadow: 0 0 0 1px #21b799; }
+
+/* ── 切片预览（在基础层上标注继承修改）── */
+.o_slice_target { position: relative; outline: 2px dashed #8b5cf6; outline-offset: 1px; }
+.o_slice_target.o_slice_inherited { outline-color: #cbd5e1; }
+.o_slice_badge {
+  display: inline-block; margin: 4px 0 2px; padding: 3px 9px; border-radius: 6px;
+  font-size: 11px; background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe;
+}
+.o_slice_badge.current { border-color: #c4b5fd; font-weight: 600; }
+.o_slice_badge.inherited { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+.o_slice_note {
+  margin: 8px 0; padding: 7px 10px; border-radius: 6px; font-size: 12px;
+  background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
+}
+.o_slice_insert {
+  margin: 4px 0 6px; padding: 5px 9px; border-radius: 6px; font-size: 11px;
+  background: #f5f3ff; color: #5b21b6; border: 1px dashed #c4b5fd;
+}
+.o_slice_replaced { opacity: .45; text-decoration: line-through; }
+
+/* ── 结构条：<header> / <footer> ──────────────────────────────
+ * 画布仿真节点用 <div> 承载：它们是被编辑视图的可视化投影，不是本页的文档区域，
+ * 用真实 <header>/<footer> 会给设计器页面带来第二个 banner/contentinfo landmark。
+ * ------------------------------------------------------------------ */
+.o_form_header_region { position: relative; }
+.o_form_header_region.sel > .o_form_statusbar,
+.o_form_footer.sel { outline: 2px solid #714b67; outline-offset: 1px; }
+.o_struct_tag {
+  position: absolute; top: 2px; left: 2px;
+  padding: 1px 7px; border-radius: 4px; font-size: 10px; letter-spacing: .04em;
+  color: #5b21b6; background: #ede9fe; border: 1px solid #ddd6fe;
+}
+.o_form_footer {
+  position: relative; margin-top: 6px; padding: 8px 10px;
+  background: #fff; border: 1px solid #d6d6d6; border-top: none;
+  border-radius: 0 0 3px 3px;
+}
+.o_form_footer > .o_struct_tag { top: 4px; left: 8px; }
+.o_form_footer_buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+/* 结构条作为普通容器出现时（切片 patch 元素 / 非 form 根位置） */
+.o_struct_box { border: 1px dashed #a78bfa; border-radius: 8px; padding: 8px; margin: 8px 0; background: #faf8ff; }
+.o_struct_box.sel { outline: 2px solid #714b67; }
+.o_struct_title { font-size: 11px; color: #5b21b6; margin-bottom: 6px; }
+.o_struct_children { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+
+/* ── 通用布局块 <div> / 独立 <label> ──────────────────────
+ * 二者都用 <div> 仿真：画布节点是「被编辑视图」的投影，孤立 <label>
+ * 没有关联控件会污染设计器页面的表单语义（见 designer/README.md）。
+ * ------------------------------------------------------------------ */
+.o_layout_div { border: 0; border-radius: 3px; padding: 0; margin: 0; background: transparent; }
+.o_node.focus > .o_layout_div { outline: 1px dashed #94a3b8; outline-offset: 3px; }
+.o_node.sel > .o_layout_div { outline: 1px solid #21b799; outline-offset: 3px; }
+/* 已知 Odoo class 才影响画布外观；不把任意用户 class 直接塞进 DOM，避免破坏设计器 */
+.o_layout_div[data-odoo-class~="oe_title"] { margin-bottom: 6px; }
+.o_layout_div[data-odoo-class~="oe_title"] .o_field_widget .o_input {
+  font-size: 20px; font-weight: 600; border-color: transparent; padding-left: 0;
+}
+.o_layout_div[data-odoo-class~="oe_title"] .o_readonly_value { font-size: 20px; font-weight: 600; }
+.o_layout_div[data-odoo-class~="oe_inline"] { display: flex; align-items: baseline; gap: 8px; }
+.o_layout_div[data-odoo-class~="oe_right"] { text-align: right; }
+.o_layout_div_tag {
+  display: inline-block; margin-bottom: 6px; padding: 1px 7px; border-radius: 4px;
+  font-size: 10px; color: #475569; background: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.o_dsl_label { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.o_custom_widget {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border: 1px solid #dee2e6; border-radius: 4px;
+  background: #fff; color: #333; font-size: 13px;
+}
+.o_custom_widget_label { font-weight: 600; }
+.o_custom_widget_tag {
+  font-size: 10px; color: #5b21b6; background: #ede9fe; border-radius: 4px; padding: 1px 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.o_label_meta {
+  font-size: 10px; color: #64748b; background: #f1f5f9;
+  border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── 自定义 view type / view element 的画布投影（§2.1）────────
+ * 一律用 <div> 承载：它们是「被编辑视图」的可视化，不是设计器页面的
+ * 文档区域，也不把用户写的 Odoo tag 当成真实 DOM 标签名。
+ * ------------------------------------------------------------------ */
+.o_custom_type_banner {
+  margin: 0 0 10px; padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; color: #5b21b6;
+  background: #ede9fe; border: 1px solid #ddd6fe;
+}
+.o_custom_element {
+  display: inline-block; margin: 6px 8px 6px 0; padding: 7px 10px;
+  border: 1px solid #c4b5fd; border-radius: 8px; background: #faf8ff;
+  vertical-align: top; min-inline-size: 120px;
+}
+.o_custom_element.sel { outline: 2px solid #714b67; outline-offset: 1px; }
+.o_custom_tag {
+  font-size: 11px; font-weight: 600; color: #5b21b6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.o_custom_props {
+  margin-top: 4px; font-size: 10px; color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+.o_custom_warn { margin-top: 4px; font-size: 10px; color: #b91c1c; }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * OWL 组件层专属样式（designer-owl/）
+ * --------------------------------------------------------------------------
+ * 与原型 designer/ 的关键差异：原型用挂在 body 下的全局单例 position:fixed
+ * 浮动条，需要 180ms 延迟隐藏 + 嵌套祖先守卫才能避免「移开消失 / 外层抢焦」。
+ * OWL 版每个 Node 组件自带工具栏与落点，二者都是节点 DOM 子树：
+ *   - e.target.closest('[data-node-id]') 恒命中最近的宿主节点；
+ *   - 从节点移到它自己的工具栏不跨越任何外层区域，焦点不转移；
+ *   - 内层工具栏的最近宿主恒为内层节点，外层无法抢焦。
+ * 因此无需任何定时器或几何计算。样式上二者都绝对定位、不撑开布局。
+ * ══════════════════════════════════════════════════════════════════════ */
+.o_canvas_root { min-height: 100%; }
+
+.o_node { position: relative; border-radius: 3px; }
+/* 容器作为落点的定位上下文；.o_node 承载栅格间距，保持与真实 Odoo arch 一致 */
+.o_form_sheet_body, .o_group.o_inner_group, .tab-pane, .o_layout_div,
+.o_form_header_region, .o_form_footer, .o_struct_children, .o_generic_box { position: relative; }
+.o_form_sheet_body > .o_node { margin-bottom: 12px; }
+.o_node.focus { outline: 1px solid #21b799; outline-offset: 1px; }
+.o_node.sel { outline: 2px solid #21b799; outline-offset: 1px; }
+
+/* 每个节点自己的上下文操作条：内嵌于节点，不浮出节点边界 */
+.o_node_toolbar {
+  position: absolute; top: 2px; right: 2px; z-index: 30;
+  display: flex; gap: 4px; align-items: center;
+  padding: 3px 5px; background: #fff;
+  border: 1px solid #21b799; border-radius: 8px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .16);
+  font-size: 12px; line-height: 1;
+}
+.o_node_toolbar .o_nt_tag {
+  font-size: 10px; color: #1a7f6b; background: #e9f3f1;
+  border-radius: 4px; padding: 2px 6px; max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.o_node_toolbar button {
+  min-inline-size: 24px; min-block-size: 24px; height: 24px; padding: 0 7px;
+  border: 1px solid #21b799; border-radius: 5px;
+  background: #fff; color: #1a7f6b; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+@media (hover: hover) {
+  .o_node_toolbar button:hover { background: #21b799; color: #fff; }
+}
+.o_node_toolbar button.danger { border-color: #fecaca; color: #b91c1c; }
+.o_node_toolbar button:focus-visible { outline: 2px solid #159b80; outline-offset: 1px; }
+.o_node_toolbar .o_nt_pick {
+  height: 24px; max-width: 130px; padding: 0 4px;
+  border: 1px solid #ced4da; border-radius: 5px;
+  font-size: 12px; background: #fff; color: #333;
+}
+
+/* 落点：默认 6px 细虚线，hover 时浮出工具条（绝对定位，不影响布局） */
+/* WYSIWYG 一等约束：落点必须脱离文档流。若留在 grid/flex 流内，它会成为
+   一个 item，把 Odoo 的两列 group 挤成单列、插入大量空白行。
+   绝对定位后仍由节点自身 DOM 承载，closest() 焦点归属不变。 */
+.o_drop { position: absolute; left: 0; right: 0; height: 10px; z-index: 26; }
+/* Node 内的落点 = 插入到该元素之前；容器直属落点 = 追加到末尾 */
+.o_node > .o_drop { top: -10px; }
+.o_form_sheet_body > .o_drop, .o_group.o_inner_group > .o_drop, .tab-pane > .o_drop,
+.o_layout_div > .o_drop, .o_struct_children > .o_drop, .o_generic_box > .o_drop,
+.o_form_statusbar > .o_drop, .o_form_footer_buttons > .o_drop { bottom: -10px; }
+.o_form_statusbar, .o_form_footer_buttons { position: relative; }
+.o_drop_line {
+  height: 2px; border-top: 2px dashed transparent; border-radius: 2px;
+  transition: border-color .1s;
+}
+.o_drop.over .o_drop_line { border-top-color: #21b799; }
+@media (hover: hover) {
+  .o_drop:hover .o_drop_line { border-top-color: #21b799; }
+}
+.o_drop_tools {
+  position: absolute; top: -9px; left: 0; right: 0; z-index: 25;
+  display: flex; align-items: center; gap: 8px;
+  /* 不用 display:none：会移出可聚焦树，键盘用户永远无法触发 focus-within */
+  opacity: 0; pointer-events: none;
+  padding: 3px 8px; background: #eff6ff;
+  border: 1px solid #93c5fd; border-radius: 7px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .1);
+}
+.o_drop:focus-within .o_drop_tools, .o_drop.over .o_drop_tools { opacity: 1; pointer-events: auto; }
+@media (hover: hover) {
+  .o_drop:hover .o_drop_tools { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none) {
+  /* 无 hover 设备：落点工具条常驻且参与布局，保证可达 */
+  .o_drop { height: 24px; }
+  .o_node > .o_drop { top: -24px; }
+  .o_form_sheet_body > .o_drop, .o_group.o_inner_group > .o_drop,
+  .tab-pane > .o_drop, .o_layout_div > .o_drop,
+  .o_form_statusbar > .o_drop, .o_form_footer_buttons > .o_drop { bottom: -24px; }
+  .o_drop_tools { opacity: 1; pointer-events: auto; }
+}
+.o_drop_tools select {
+  min-height: 24px; height: 24px; max-width: 260px;
+  border: 1px solid #93c5fd; border-radius: 5px;
+  font-size: 12px; background: #fff; color: #333; padding: 0 4px;
+}
+.o_drop_hint { font-size: 11px; color: #1d4ed8; }
+.o_drop.over .o_drop_tools { background: #fff7ed; border-color: #fb923c; }
+.o_drop.over .o_drop_hint { color: #c2410c; }
+
+.o_generic_box { border: 0; border-radius: 3px; padding: 0; margin: 0; background: transparent; }
+.o_node.focus > .o_generic_box { outline: 1px dashed #cbd5e1; outline-offset: 3px; }
+.o_slice_badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.o_slice_note { margin: 0 0 8px; }
+
+/* 原生 <dialog> + showModal()：inert / 焦点 containment / Esc / 焦点返回由浏览器提供。
+   不写 role="dialog"、aria-modal、焦点陷阱或 Esc handler；不用 html/body overflow:hidden 锁滚动。
+   display 相关规则限定在 dialog[open]，避免覆盖关闭态。 */
+dialog:modal { overscroll-behavior: contain; }
+dialog::backdrop {
+  background: rgba(15, 23, 42, .45);
+  overflow: hidden; overscroll-behavior: contain;
+}
+dialog[open] {
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 16px 18px; border: 1px solid #cbd5e1; border-radius: 12px;
+  color: #0f172a; background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, .2);
+}
+dialog[open] h2 { font-size: 15px; margin: 0 0 8px; }
+dialog[open] p { margin: 0 0 14px; color: #64748b; font-size: 13px; line-height: 1.5; }
+dialog[open] form[method="dialog"] { display: flex; justify-content: flex-end; }
+/* 代码块：<code> 承载文本语义，但不应带内联 code 的浅底与 padding */
+pre code { background: none; padding: 0; border-radius: 0; color: inherit; font: inherit; }
+
+.cb_label { display: inline-block; font-size: 12px; color: #64748b; margin: 0 4px 0 0; }
+.canvas-bar select { width: auto; min-width: 130px; font-size: 12px; padding: 4px 6px; }
+
+
+/* ══════════════════════════════════════════════════════════════════════
+ * WYSIWYG 一等约束 · 纯预览模式
+ * 编辑外壳（工具栏 / 落点 / 选中描边 / 结构提示 / 侧栏）在此模式下全部移除，
+ * 画布 DOM 只剩真实视图元素与它们的示例数据；左右栏收起后画布占满可用宽度。
+ * ══════════════════════════════════════════════════════════════════════ */
+.o_preview .o_node_toolbar,
+.o_preview .o_drop,
+.o_preview .o_slice_note,
+.o_preview .o_slice_badges,
+.o_preview .o_custom_type_banner,
+.o_preview .o_custom_widget_tag,
+.o_preview .o_alert,
+.o_preview .o_custom_warn,
+.o_preview .canvas-bar .hint,
+.o_preview footer.pagefoot { display: none !important; }
+.o_preview .col.left, .o_preview .col.right { display: none !important; }
+.o_preview .canvas { padding: 0; }
+/* 侧栏收起后画布会变宽；锁定编辑态测得的宽度，保证 WYSIWYG 逐像素可比 */
+.o_preview .o_form_view { max-width: var(--o_wys_width, 934px); margin-inline: auto; }
+.o_preview .canvas-bar { padding-inline: 18px; }
+.o_preview .o_node.focus, .o_preview .o_node.sel,
+.o_preview .o_field_widget.sel, .o_preview .o_group.sel,
+.o_preview .o_notebook.sel, .o_preview .o_form_label.sel {
+  outline: none !important; box-shadow: none !important;
+}
+.o_preview .o_node { cursor: default; }
+.o_preview .o_node.focus > .o_layout_div,
+.o_preview .o_node.sel > .o_layout_div,
+.o_preview .o_node.focus > .o_generic_box { outline: none !important; }
+/* 真实 Odoo：invisible 字段不渲染；只读控件不显示可编辑焦点环 */
+.o_preview .o_node.o_invisible_modifier { display: none !important; }
+.o_preview .o_input { pointer-events: none; }
+.o_preview .o_input:focus { box-shadow: none; }
+.o_preview .o_notebook_tab { pointer-events: none; }
+.cb_preview { margin-left: auto; white-space: nowrap; }
+.cb_preview[aria-pressed="true"] { background: #21b799; border-color: #21b799; color: #fff; }
+
+/* 空 <div>/<if> 等容器在真实 Odoo 里高度为 0；编辑态给最小可编辑锚点，
+   纯预览态不生效，保证 WYSIWYG 不因编辑外壳改变布局。 */
+.owl_app:not(.o_preview) .o_layout_div,
+.owl_app:not(.o_preview) .o_generic_box,
+.owl_app:not(.o_preview) .o_struct_children { min-height: 24px; }

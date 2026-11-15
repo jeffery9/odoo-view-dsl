@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Odoo View DSL · Designer (OWL components)</title>
+<link rel="stylesheet" href="odoo.css" />
+<!-- 依赖全部本地自托管（vendor/）：OWL 2.3.0 与项目生成产物同栈、零新增运行时依赖；
+     js-yaml 产出 DSL；ajv2020.bundle.js 提供 Draft 2020-12 权威 schema 校验
+     （fetch ../schema/dsl_schema.json；离线 / 失败时自动降级到 lean 校验）。 -->
+<script src="vendor/js-yaml.min.js"></script>
+<script src="vendor/owl.iife.min.js"></script>
+<script src="vendor/ajv2020.bundle.js"></script>
+<style>
+  :root{
+    --bg:#f1f5f9; --card:#ffffff; --border:#e2e8f0; --border2:#cbd5e1;
+    --text:#0f172a; --muted:#64748b; --accent:#2563eb; --danger:#dc2626; --ok:#16a34a;
+    --canvas:#eef2f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.6 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color:var(--text);background:var(--bg)}
+  header.app_head{padding:12px 18px;border-bottom:1px solid var(--border);background:var(--card)}
+  header.app_head h1{font-size:15px;margin:0;display:inline-block}
+  header.app_head p{margin:2px 0 0;color:var(--muted);font-size:12px}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;
+    background:#e0f2fe;color:#075985;margin-left:6px}
+  .wrap{display:flex;gap:0;height:calc(100vh - 90px)}
+  /* 页面级 contentinfo 每页仅一个；画布里的 Odoo <header>/<footer> 仿真节点用 <div> 承载 */
+  footer.pagefoot{padding:6px 18px;border-top:1px solid var(--border);background:var(--card);
+    color:var(--muted);font-size:12px;display:flex;gap:10px;align-items:center;min-height:33px}
+  .col{overflow:auto;padding:14px}
+  .col.left{flex:0 0 250px;border-right:1px solid var(--border);background:var(--card)}
+  .col.center{flex:1 1 auto;background:var(--canvas);min-width:0;padding:0}
+  .col.right{flex:0 0 380px;border-left:1px solid var(--border);background:var(--card)}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:12px;margin:0 0 9px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--border2);border-radius:8px;
+    font:inherit;color:var(--text);background:#fff}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  button{cursor:pointer;border:1px solid var(--border2);background:#fff;color:var(--text);
+    padding:6px 10px;border-radius:8px;font:inherit}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--danger);border-color:#fecaca}
+  button.sm{padding:3px 8px;font-size:12px;min-block-size:24px;min-inline-size:24px}
+  .muted{color:var(--muted);font-size:12px}
+  .typebadge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:#e0f2fe;color:#075985}
+  .modlist{margin-top:4px}
+  .moditem{font-size:12px;color:var(--text);background:#f1f5f9;border:1px solid var(--border);
+    border-radius:8px;padding:5px 9px;margin-bottom:5px}
+
+  .palette{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{font-size:12px;padding:4px 9px;border:1px solid var(--border2);border-radius:999px;
+    background:#f8fafc;cursor:grab;user-select:none}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .chip:active{cursor:grabbing}
+  .chip.sm{padding:2px 8px;font-size:11px;cursor:pointer}
+  .addbtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .addbtns.structural{width:100%;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)}
+  .addbtns.custom{width:100%;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)}
+  .tree{font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--muted);
+    white-space:pre;margin-top:6px;max-height:200px;overflow:auto}
+
+  .canvas-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;
+    border-bottom:1px solid var(--border);background:var(--card)}
+  .canvas-bar .hint{color:var(--muted);font-size:12px}
+  .canvas{padding:18px;min-height:calc(100% - 45px)}
+
+  .insp-title{font-size:13px;font-weight:600;margin:0 0 8px;display:flex;
+    justify-content:space-between;align-items:center}
+  .status{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:10px}
+  .status.ok{background:#dcfce7;color:#14532d;border:1px solid #bbf7d0}
+  .status.err{background:#fee2e2;color:#7f1d1d;border:1px solid #fecaca}
+  ul.errs{margin:6px 0 0;padding-left:18px}.errs li{color:var(--danger);font-size:12px}
+  pre{background:#0f172a;color:#e2e8f0;padding:10px;border-radius:10px;overflow:auto;font-size:11px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-height:340px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .toolbar .grow{flex:1}
+  code{background:#eef2ff;padding:1px 5px;border-radius:5px;font-size:12px}
+
+  .layers{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+  .layer{border:1px solid var(--border);border-radius:9px;padding:8px 9px;background:#f8fafc;
+    cursor:pointer;transition:.1s}
+  .layer:hover{border-color:var(--accent)}
+  .layer.active{border-color:var(--accent);box-shadow:0 0 0 2px #bfdbfe66;background:#eff6ff}
+  .layer-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .layer-name{font-size:13px;font-weight:600;color:var(--text)}
+  .layer-badge{font-size:10px;padding:1px 7px;border-radius:999px}
+  .layer-badge.base{background:#dcfce7;color:#14532d}
+  .layer-badge.slice{background:#ede9fe;color:#5b21b6}
+  .layer-meta{font-size:10px;color:var(--muted)}
+  .layer-inherit{margin-top:6px;font-size:12px}
+  .layer-ctl{display:flex;gap:5px;margin-top:7px;justify-content:flex-end}
+  .layer-ctl button{padding:2px 8px;font-size:11px;min-block-size:24px;min-inline-size:24px}
+  .patch{border:1px solid var(--border);border-radius:9px;padding:9px;margin:9px 0;background:#fbfcfe}
+  .patch .insp-title{margin-bottom:6px}
+  .patch-elems{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+
+  .reg-card h3{font-size:11px;margin:12px 0 6px;color:var(--accent);letter-spacing:.02em}
+  .reg-item{border:1px solid var(--border2);border-radius:9px;padding:8px;margin:8px 0;background:#fbfcfe}
+  .reg-item > button{margin-top:8px}
+  .reg-field label{margin:6px 0 2px}
+  .reg-card .muted{line-height:1.45}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="dsl-core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
