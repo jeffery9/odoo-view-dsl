@@ -278,23 +278,13 @@
       default: return { kind };
     }
   }
-  // 节点打标：data-path = 编辑路径，data-xpath = 该元素作为切片目标的表达式
+  // 节点打标：data-path = 编辑路径，data-xpath = 该元素作为切片目标的表达式。
+  // 编辑 / 拖放 / 选择字段的入口统一收口到「焦点跟随的上下文操作条」（见 initCtxToolbar），
+  // 因此这里只做路径打标，不再为单个元素挂常驻悬浮按钮，避免画布被操作条淹没。
   function mark(node, path, e) {
     node.setAttribute("data-path", path);
     const xp = xpathForElement(e);
     if (xp) node.setAttribute("data-xpath", xp);
-    // 每个画布元素都带「编辑入口」：悬浮显式操作条（✎）。
-    // 用原生 <button> 触发，符合 modern-web-guidance（显式按钮 + 键盘可达 + 焦点 containment）。
-    node.classList.add("o_elem_box");
-    const acts = el("div", { class: "o_elem_actions", "aria-label": "元素操作" });
-    const editBtn = el("button", { type: "button", class: "o_elem_btn",
-      title: "编辑此元素", "aria-label": "编辑此元素", text: "✎" });
-    editBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();                 // 阻止冒泡到 #canvas 委托，避免重复选中
-      selectElement(path, node.getAttribute("data-xpath"));
-    });
-    acts.appendChild(editBtn);
-    node.appendChild(acts);
     return node;
   }
 
@@ -784,6 +774,7 @@
   }
 
   function renderCanvas() {
+    if (ctxToolbar) ctxHide();          // 重建画布前清掉旧操作条引用（节点已被替换）
     renderCanvasBody();
     // 画布里的字段标签/控件也是真实 DOM：显式 for/id 关联并给预览控件命名，
     // 避免页面出现孤立 <label> 与无名 input（modern-web-guidance forms/accessibility）。
@@ -795,6 +786,7 @@
       while (lab.firstChild) div.appendChild(lab.firstChild);
       lab.replaceWith(div);
     });
+    if (selectedPath) ctxShowSelected();   // 重建后把操作条重新锚定到选中元素（键盘可达）
   }
   function renderCanvasBody() {
     const cv = $("#canvas"); cv.innerHTML = "";
@@ -835,18 +827,16 @@
     const sheetBg = el("div", { class: "o_form_sheet_bg" });
     const sheet = el("div", { class: "o_form_sheet" });
     const body = el("div", { class: "o_form_sheet_body" });
+    body.setAttribute("data-path", base + ".elements");   // 根容器：空白处也可接收新组件
     const bodyEls = [];
     rootEls.forEach((e, i) => {
       if (e.kind === "header" || e.kind === "footer") return;   // 结构条已单独渲染
       if (e.kind === "button" && headerIdx < 0) return;          // 旧兼容：已上提到状态栏
       bodyEls.push({ e, i });
     });
-    // 每个根元素前穿插停靠区（按根下标插入，保持 footer 恒在末尾），末尾再补一个
-    bodyEls.forEach(({ e, i }) => {
-      body.appendChild(renderDropzone(base + ".elements", a.modelDef, i));
-      body.appendChild(canvasElem(e, base + ".elements[" + i + "]", a.modelName, 0));
-    });
-    body.appendChild(renderDropzone(base + ".elements", a.modelDef, rootEls.length));
+    // 根元素直接渲染；新组件落入改由焦点跟随的上下文操作条统一处理。
+    bodyEls.forEach(({ e, i }) =>
+      body.appendChild(canvasElem(e, base + ".elements[" + i + "]", a.modelName, 0)));
     sheet.appendChild(body);
     sheetBg.appendChild(sheet);
     fv.appendChild(sheetBg);
@@ -872,6 +862,7 @@
       (tdef && tdef.className ? " → " + tdef.className : "") }));
     const sheet = el("div", { class: "o_form_sheet" });
     const base = "bindings[" + activeB + "].views[" + activeV + "]";
+    sheet.setAttribute("data-path", base + ".elements");   // 根容器：空白处也可接收新组件
     appendChildren(sheet, base + ".elements", a.view.elements, a.modelName, 0);
     sheet.appendChild(el("div", { class: "muted", text:
       "OWL 三件套（.js/.xml/.scss）由后端 B 生成；画布只呈现元素编排，权威结果请用 python3 -m oview.pipeline。" }));
@@ -899,8 +890,6 @@
     wrap.appendChild(structureTag("header"));
     const bar = el("div", { class: "o_form_statusbar" });
     (elem.children || []).forEach((c, ci) => {
-      // 每个子元素前都穿插一个停靠区（按位置插入），保证每个元素都可直接接收新组件
-      bar.appendChild(renderDropzone(path + ".children", a.modelDef, ci));
       const cp = path + ".children[" + ci + "]";
       if (c.kind === "field" && (c.widget === "statusbar" || c.name === "state")) {
         bar.appendChild(mark(statusPills(a, c), cp, c));
@@ -908,7 +897,6 @@
         bar.appendChild(canvasElem(c, cp, a.modelName, 0));
       }
     });
-    bar.appendChild(renderDropzone(path + ".children", a.modelDef, (elem.children || []).length));
     wrap.appendChild(bar);
     if (!(elem.children || []).some((c) => c.kind === "field" && (c.widget === "statusbar" || c.name === "state"))) {
       const sf = a.modelDef && a.modelDef.fields.find((f) => f.name === "state" && f.type === "selection" && Array.isArray(f.selection));
@@ -1192,52 +1180,12 @@
     return mark(el("div", { class: "o_alert" + (isSel ? " sel" : ""), text: "▣ " + elem.kind }), path, elem);
   }
 
-  function renderDropzone(arrPath, modelDef, index) {
-    // 切片层画布是基础层镜像：拖拽/加字段必须落到 patch，而非基础层或 extension.elements
-    const a = getActive();
-    const inPatch = /\.patches\[\d+\]\.elements/.test(arrPath);
-    const target = (isSliceSelected() && !inPatch) ? sliceAddTargetPath(a.view, a.binding) : arrPath;
-    // 切片层落点被重定向到 patch.elements，原 index 不再对应基础层位置，统一改为末尾追加
-    const useIndex = (target === arrPath) ? index : null;
-    const dz = el("div", { class: "o_form_dropzone" + (useIndex != null ? " inline" : "") });
-    dz.appendChild(el("span", { text: "⤵ 拖拽字段到此，或 " }));
-    if (modelDef) {
-      const sel = el("select", { onchange: (e) => {
-        if (e.target.value) {
-          const ok = useIndex != null
-            ? insertAtTarget(target, useIndex, { kind: "field", name: e.target.value })
-            : appendAtTarget(target, { kind: "field", name: e.target.value });
-          if (ok) { e.target.value = ""; rerenderAll(); }
-        }
-      } });
-      sel.appendChild(el("option", { value: "", text: "从模型选择字段 +" }));
-      modelDef.fields.forEach((f) => sel.appendChild(el("option", { value: f.name, text: f.name + " (" + f.type + ")" })));
-      dz.appendChild(sel);
-    } else { dz.appendChild(el("span", { class: "muted", text: "（加载模型定义后可用）" })); }
-    dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
-    dz.addEventListener("dragleave", () => dz.classList.remove("over"));
-    dz.addEventListener("drop", (e) => {
-      e.preventDefault(); dz.classList.remove("over");
-      const name = (e.dataTransfer && e.dataTransfer.getData("text")) || dragField;
-      if (name) {
-        if (useIndex != null) insertAtTarget(target, useIndex, { kind: "field", name });
-        else appendAtTarget(target, { kind: "field", name });
-        rerenderAll();
-      }
-    });
-    return dz;
-  }
-
-  // 在容器子列表里「按位置」穿插停靠区：每个子元素前有一个（插入到其下标），
-  // 末尾再补一个（插入到末尾）。这样每个元素都有可接收新组件的停靠区，且支持
-  // 精确插到指定兄弟位置（而非只能追加到容器末尾）。
+  // 渲染容器的子列表。新组件「落入」改由焦点跟随的上下文操作条统一处理
+  // （见 initCtxToolbar）：落点 = 当前焦点容器，支持选择字段下拉与拖放，
+  // 不再为每个子元素常驻插入停靠区，避免画布被停靠条淹没。
   function appendChildren(box, arrPath, children, modelName, depth) {
-    const modelDef = getModel(modelName);
-    (children || []).forEach((c, ci) => {
-      box.appendChild(renderDropzone(arrPath, modelDef, ci));
-      box.appendChild(canvasElem(c, arrPath + "[" + ci + "]", modelName, depth + 1));
-    });
-    box.appendChild(renderDropzone(arrPath, modelDef, (children || []).length));
+    (children || []).forEach((c, ci) =>
+      box.appendChild(canvasElem(c, arrPath + "[" + ci + "]", modelName, depth + 1)));
   }
 
   function selectElement(path, domXpath) {
@@ -1258,6 +1206,197 @@
       return;
     }
     selectedPath = path; renderCanvas(); renderRight();
+  }
+
+  // ════════════ 焦点跟随的上下文操作条 ════════════
+  // 需求：操作条「跟随鼠标焦点」，只在焦点所在元素「可编辑」时，才在该元素处出现
+  // 「拖放 / 选择字段」的上下文操作——取代原先每个区域都常驻的停靠区。
+  // 触发：① 悬浮（mousemove）解析光标下 [data-path] 宿主；② 选中 / 键盘（selectElement）
+  // 锚定到选中元素，键盘用户可 Tab 进按钮；③ 拖拽（dragover/drop）解析落点容器。
+  // 内容随上下文变化：容器 → 显示「＋字段」展开模型字段下拉，且操作条本身是拖放落点；
+  // 任意可编辑元素 → 「✎ 编辑」「🗑 删除」。
+  let ctxToolbar = null, ctxHost = null, ctxPath = null, ctxAddPath = null;
+
+  function editableTarget(path) {
+    if (!path) return null;
+    if (/\.elements$/.test(path)) return { isRoot: true, elem: null, addPath: path, isContainer: true };
+    const elem = getPath(state, path);
+    if (!elem || !elem.kind) return null;
+    const def = KIND_DEFS[elem.kind] || {};
+    if (def.children) {
+      let addPath;
+      if (elem.kind === "notebook") {
+        const pages = elem.pages || [];
+        const pi = notebookActive[path] != null ? notebookActive[path] : 0;
+        if (!pages[pi]) return { elem, addPath: null, isContainer: true };
+        addPath = path + ".pages[" + pi + "].children";
+      } else {
+        addPath = path + ".children";
+      }
+      return { elem, addPath, isContainer: true };
+    }
+    return { elem, addPath: null, isContainer: false };
+  }
+  // 切片层：落点重定向到 patch.elements（与 getAddTargetPath 同规则）
+  function resolveAddPath(p) {
+    const a = getActive();
+    const inPatch = /\.patches\[\d+\]\.elements/.test(p);
+    return (isSliceSelected() && !inPatch) ? sliceAddTargetPath(a.view, a.binding) : p;
+  }
+  function removeAtPath(path) {
+    const m = path.match(/^(.*)\[(\d+)\]$/);
+    if (!m) return false;
+    const parent = getPath(state, m[1]);
+    if (!Array.isArray(parent)) return false;
+    parent.splice(parseInt(m[2], 10), 1);
+    return true;
+  }
+  function fieldPicker(modelDef, onPick) {
+    const sel = el("select", { "aria-label": "选择要添加的字段" });
+    sel.appendChild(el("option", { value: "", text: "＋ 字段…" }));
+    if (modelDef) modelDef.fields.forEach((f) =>
+      sel.appendChild(el("option", { value: f.name, text: f.name + " (" + f.type + ")" })));
+    else sel.appendChild(el("option", { value: "", text: "（先加载模型）" }));
+    sel.addEventListener("change", () => { if (sel.value) { onPick(sel.value); sel.value = ""; } });
+    sel.addEventListener("click", (e) => e.stopPropagation());
+    return sel;
+  }
+  function ctxBuild(host, path) {
+    const t = editableTarget(path);
+    if (!t) return false;
+    const a = getActive();
+    ctxPath = path; ctxAddPath = t.addPath;
+    ctxToolbar.innerHTML = "";
+    if (t.addPath) {
+      ctxToolbar.classList.add("can-add");
+      const addBtn = el("button", { type: "button", class: "o_ctx_add", title: "添加字段到此处", text: "＋ 字段" });
+      const picker = fieldPicker(a.modelDef, (name) => {
+        if (appendAtTarget(resolveAddPath(t.addPath), { kind: "field", name })) rerenderAll();
+      });
+      picker.style.display = "none";
+      addBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        picker.style.display = picker.style.display === "none" ? "" : "none";
+        if (picker.style.display !== "none") picker.focus();
+      });
+      ctxToolbar.appendChild(addBtn);
+      ctxToolbar.appendChild(picker);
+    } else {
+      ctxToolbar.classList.remove("can-add");
+    }
+    // 根容器（.elements）只提供「添加」，不提供编辑 / 删除
+    if (!t.isRoot) {
+      const xp = host.getAttribute("data-xpath");
+      const editBtn = el("button", { type: "button", class: "o_ctx_edit", title: "编辑此元素", text: "✎" });
+      editBtn.addEventListener("click", (e) => { e.stopPropagation(); selectElement(path, xp); });
+      const delBtn = el("button", { type: "button", class: "o_ctx_del", title: "删除此元素", text: "🗑" });
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (removeAtPath(path)) {
+          if (selectedPath && selectedPath.indexOf(path) === 0) selectedPath = null;
+          rerenderAll();
+        }
+      });
+      ctxToolbar.appendChild(editBtn);
+      ctxToolbar.appendChild(delBtn);
+    }
+    return true;
+  }
+  function ctxPosition(host) {
+    ctxToolbar.style.visibility = "hidden";
+    ctxToolbar.style.display = "flex";
+    const hr = host.getBoundingClientRect();
+    const tw = ctxToolbar.offsetWidth, th = ctxToolbar.offsetHeight;
+    // 与宿主「贴边、零间隙」并水平居中于宿主：消除从区域移向菜单时鼠标穿过外层区域的那段
+    // 空白，配合 mousemove 的祖先守卫与 180ms 缓冲，解决嵌套场景内层菜单被外层抢焦。
+    let top = hr.top - th;
+    if (top < 8) top = hr.bottom;          // 顶部空间不足则贴在宿主下方（同样零间隙）
+    let left = hr.left + (hr.width - tw) / 2;   // 水平居中，减少跨越外层区域
+    if (left < 8) left = 8;
+    if (left + tw > window.innerWidth - 8) left = window.innerWidth - tw - 8;
+    ctxToolbar.style.top = top + "px";
+    ctxToolbar.style.left = left + "px";
+    ctxToolbar.style.visibility = "visible";
+  }
+  function ctxShow(host, path, isDrop) {
+    // 同一宿主不重复重建：否则每次 mousemove 都会重建 DOM，会销毁已打开的字段下拉等交互态。
+    // 仅首次出现或路径变化时重建内容；定位与显示态每次都刷新（宿主可能滚动/移动）。
+    if (path !== ctxPath || !ctxToolbar.classList.contains("show")) {
+      if (!ctxBuild(host, path)) { ctxHide(); return; }
+      if (ctxHost && ctxHost !== host) ctxHost.classList.remove("o_ctx_host");
+      ctxHost = host; host.classList.add("o_ctx_host");
+    }
+    ctxToolbar.classList.toggle("o_ctx_drop", !!isDrop);
+    ctxPosition(host);
+    ctxToolbar.classList.add("show");
+  }
+  function ctxHide() {
+    if (!ctxToolbar) return;
+    ctxToolbar.classList.remove("show", "o_ctx_drop");
+    ctxToolbar.style.display = "none";
+    if (ctxHost) ctxHost.classList.remove("o_ctx_host");
+    ctxHost = null; ctxPath = null; ctxAddPath = null;
+  }
+  function ctxHostFromEvent(e) {
+    let host = e.target.closest ? e.target.closest("[data-path]") : null;
+    if (!host && ctxToolbar && ctxToolbar.contains(e.target)) host = ctxHost;  // 拖拽悬停到操作条本身
+    return host;
+  }
+  function initCtxToolbar() {
+    ctxToolbar = el("div", { class: "o_ctx_toolbar", role: "toolbar", "aria-label": "元素上下文操作" });
+    ctxToolbar.style.display = "none";
+    document.body.appendChild(ctxToolbar);
+    // 延迟隐藏：鼠标从宿主移向工具栏（position:fixed、挂在 body 下，其事件不冒泡到 #canvas）
+    // 会短暂经过空白画布，若立即隐藏则菜单无法被点击。给 180ms 缓冲，进入工具栏即取消。
+    let hideTimer = null;
+    const cancelHide = () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } };
+    const scheduleHide = () => { if (hideTimer) return; hideTimer = setTimeout(() => { hideTimer = null; ctxHide(); }, 180); };
+    const cv = $("#canvas");
+    if (!cv) return;
+    cv.addEventListener("mousemove", (e) => {
+      if (ctxToolbar.contains(e.target)) { cancelHide(); return; }   // 在工具栏自身上方：保持打开
+      const host = e.target.closest ? e.target.closest("[data-path]") : null;
+      if (host) {
+        const path = host.getAttribute("data-path");
+        if (path === ctxPath) { cancelHide(); ctxShow(host, path, false); }   // 同一宿主：保持并刷新定位
+        else if (ctxHost && ctxHost !== host && host.contains(ctxHost)) {
+          // 嵌套场景：从内层区域移向它的浮动菜单时，光标会短暂经过外层区域
+          // （菜单贴边在宿主上方，那段间隙位于外层内）。不立即切换/隐藏，交给 180ms 缓冲：
+          // 若期间到达工具栏则保持内层；若在外层停留则自然切到外层。
+          scheduleHide();
+        } else { cancelHide(); ctxShow(host, path, false); }   // 切到其它（兄弟 / 子层）元素：立即切换
+      } else {
+        scheduleHide();   // 移到完全空白区域：延迟隐藏
+      }
+    });
+    cv.addEventListener("mouseleave", (e) => { if (ctxToolbar.contains(e.relatedTarget)) return; scheduleHide(); });
+    // 鼠标进入 / 在工具栏内移动 → 取消隐藏，保持打开（修复「移开就消失、无法选择」的关键）
+    ctxToolbar.addEventListener("mouseenter", cancelHide);
+    ctxToolbar.addEventListener("mousemove", cancelHide);
+    ctxToolbar.addEventListener("mouseleave", scheduleHide);
+    // 拖拽落点：解析光标下的容器并允许 drop
+    cv.addEventListener("dragover", (e) => {
+      cancelHide();
+      const host = ctxHostFromEvent(e);
+      if (host) {
+        const t = editableTarget(host.getAttribute("data-path"));
+        if (t && t.addPath) { e.preventDefault(); ctxShow(host, host.getAttribute("data-path"), true); }
+        else scheduleHide();
+      }
+    });
+    cv.addEventListener("drop", (e) => {
+      if (!ctxAddPath) return;
+      const name = (e.dataTransfer && e.dataTransfer.getData("text")) || dragField;
+      if (name && appendAtTarget(resolveAddPath(ctxAddPath), { kind: "field", name })) rerenderAll();
+    });
+    cv.addEventListener("dragend", () => { cancelHide(); ctxHide(); });
+  }
+  // 选中元素后（键盘 / 点选）把操作条锚定到它，保证键盘可达
+  function ctxShowSelected() {
+    if (!selectedPath) { ctxHide(); return; }
+    const host = document.querySelector('[data-path="' + selectedPath + '"]');
+    if (host) ctxShow(host, selectedPath, false);
+    else ctxHide();
   }
 
   // ════════════ 右栏：检查器 + 输出 ════════════
@@ -2198,13 +2337,18 @@
   renderToolbox();
   renderCanvas();
   renderRight();
+  initCtxToolbar();   // 焦点跟随的上下文操作条（拖放 / 选择字段 / 编辑 / 删除）
 
-  // 画布点击委托：命中 [data-path] 即选中该元素；点空白处取消
+  // 画布点击委托：命中 [data-path] 即选中该元素；点空白处取消。
+  // 根容器（data-path 以 .elements 结尾）不进入选中态——它是「可落入」的落点，不是可编辑元素。
   const cvEl = $("#canvas");
   if (cvEl) cvEl.addEventListener("click", (e) => {
     const t = e.target;
     const node = t && t.closest ? t.closest("[data-path]") : null;
-    if (node) selectElement(node.getAttribute("data-path"), node.getAttribute("data-xpath"));
-    else if (t === cvEl) selectElement(null);
+    if (node) {
+      const p = node.getAttribute("data-path");
+      if (/\.elements$/.test(p)) { selectElement(null); return; }
+      selectElement(p, node.getAttribute("data-xpath"));
+    } else if (t === cvEl) selectElement(null);
   });
 })();

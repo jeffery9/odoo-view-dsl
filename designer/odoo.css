@@ -6,6 +6,28 @@
  * o_notebook / o_form_statusbar 等。
  * ========================================================================= */
 
+/* ── modern-web-guidance：浏览器 UI 主题与可达性 ───────────────────────────
+ * 设计器为浅色主题原型：显式声明 color-scheme，使原生控件（下拉箭头、复选框、
+ * 滚动条）与页面配色一致；品牌化滚动条与 accent-color；统一键盘焦点环；
+ * 交互命中区 ≥ 24px（见 .o_ctx_toolbar button）。
+ * -------------------------------------------------------------------------- */
+html, :root { color-scheme: light; }
+/* 品牌化滚动条 + 预留轨道宽度，避免内容加载时布局抖动（scrollbar-gutter: stable） */
+html {
+  scrollbar-color: #cbd5e1 #f1f5f9;   /* thumb / track */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+/* 统一键盘焦点环：所有可聚焦元素一致可见 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #159b80;
+  outline-offset: 2px;
+}
+/* 原生控件品牌色（复选框 / 单选 / range / progress） */
+:where(input, select, textarea) { accent-color: #21b799; font: inherit; }
+/* 自定义滚动容器沿用同款品牌滚动条 */
+.o_form_sheet_bg, .o_form_view { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+
 .o_form_view {
   position: relative;
   background: #f7f7f7;
@@ -208,36 +230,40 @@ select.o_input { appearance: none; -webkit-appearance: none; background-image: l
 .o_alert.logic { background: #eef3ff; border-color: #cdd8f3; color: #335; }
 .o_alert.sel { outline: 2px solid #21b799; outline-offset: 1px; }
 
-/* ── 落位区 ── */
-.o_form_dropzone {
-  border: 2px dashed #cfd8dc; border-radius: 6px; padding: 10px;
-  text-align: center; color: #888; font-size: 12px; margin: 8px 0; cursor: copy;
+/* ── 焦点跟随的上下文操作条（取代常驻停靠区 / 悬浮按钮）──
+ * 仅在「鼠标焦点所在、且可编辑」的元素上方出现：容器 → ＋字段（展开模型字段下拉）
+ * 且自身即拖放落点；任意可编辑元素 → ✎ 编辑 / 🗑 删除。键盘 / 选中态也会锚定到
+ * 选中元素，保证键盘可达（modern-web-guidance：显式 <button> + 焦点 containment）。
+ * 固定定位（position: fixed），不随画布滚动抖动；z-index 高于画布。 */
+.o_ctx_toolbar {
+  position: fixed; z-index: 60; display: none;
+  gap: 4px; align-items: center; padding: 4px 6px;
+  background: #fff; border: 1px solid #21b799; border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  font-size: 12px; line-height: 1;
 }
-.o_form_dropzone.over { border-color: #21b799; background: #eafaf6; color: #1a7f6b; }
-/* 元素之间的内联停靠区：细条、常半透明，hover/dragover 时高亮，避免画布过于拥挤 */
-.o_form_dropzone.inline {
-  border-width: 1px; padding: 2px 8px; margin: 2px 0; font-size: 11px;
-  opacity: .55; transition: opacity .12s, background .12s, border-color .12s; cursor: copy;
-}
-.o_form_dropzone.inline:hover,
-.o_form_dropzone.inline.over { opacity: 1; background: #eafaf6; border-color: #21b799; color: #1a7f6b; }
-
-/* ── 元素编辑入口（每个画布元素悬浮显式操作条）── */
-.o_elem_box { position: relative; }
-.o_elem_actions {
-  position: absolute; top: 2px; right: 2px; z-index: 30;
-  display: none; gap: 2px;
-}
-.o_elem_box:hover > .o_elem_actions,
-.o_elem_box:focus-within > .o_elem_actions { display: flex; }
-.o_elem_btn {
-  width: 22px; height: 22px; line-height: 18px; padding: 0;
-  border: 1px solid #21b799; border-radius: 50%; background: #fff; color: #1a7f6b;
-  font-size: 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+.o_ctx_toolbar.show { display: flex; }
+.o_ctx_toolbar button {
+  min-width: 24px; min-height: 24px;   /* modern-web-guidance: ≥24px 命中区 */
+  padding: 0 8px; height: 24px;
+  border: 1px solid #21b799; border-radius: 5px;
+  background: #fff; color: #1a7f6b; font-size: 12px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.o_elem_btn:hover { background: #21b799; color: #fff; }
-.o_elem_btn:focus-visible { outline: 2px solid #159b80; outline-offset: 1px; }
+.o_ctx_toolbar button:hover { background: #21b799; color: #fff; }
+.o_ctx_toolbar button:focus-visible { outline: 2px solid #159b80; outline-offset: 1px; }
+.o_ctx_toolbar .o_ctx_add { font-weight: 600; }
+.o_ctx_toolbar select {
+  height: 24px; border: 1px solid #ced4da; border-radius: 5px;
+  padding: 0 4px; font-size: 12px; background: #fff; color: #333;
+}
+.o_ctx_toolbar.o_ctx_drop { border-color: #fb923c; box-shadow: 0 4px 14px rgba(251, 146, 60, .35); }
+.o_ctx_toolbar.o_ctx_drop::after {
+  content: "⤵ 拖放到此添加"; font-size: 11px; color: #c2410c; padding-left: 4px;
+}
+
+/* 被上下文操作条锚定的宿主：轻微描边，提示「此处可操作」 */
+.o_ctx_host > * { box-shadow: 0 0 0 1px #21b799; }
 
 /* ── 切片预览（在基础层上标注继承修改）── */
 .o_slice_target { position: relative; outline: 2px dashed #8b5cf6; outline-offset: 1px; }
@@ -270,7 +296,6 @@ select.o_input { appearance: none; -webkit-appearance: none; background-image: l
   padding: 1px 7px; border-radius: 4px; font-size: 10px; letter-spacing: .04em;
   color: #5b21b6; background: #ede9fe; border: 1px solid #ddd6fe;
 }
-.o_form_header_region > .o_form_dropzone { margin: 6px 0 0; padding: 4px; font-size: 11px; }
 .o_form_footer {
   position: relative; margin-top: 6px; padding: 22px 10px 10px;
   background: #fff; border: 1px solid #d6d6d6; border-top: none;
@@ -278,7 +303,6 @@ select.o_input { appearance: none; -webkit-appearance: none; background-image: l
 }
 .o_form_footer > .o_struct_tag { top: 4px; left: 8px; }
 .o_form_footer_buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.o_form_footer > .o_form_dropzone { margin: 0 0 8px; padding: 4px; font-size: 11px; }
 
 /* 结构条作为普通容器出现时（切片 patch 元素 / 非 form 根位置） */
 .o_struct_box { border: 1px dashed #a78bfa; border-radius: 8px; padding: 8px; margin: 8px 0; background: #faf8ff; }
